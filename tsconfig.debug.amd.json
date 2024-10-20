@@ -1,0 +1,42 @@
+{
+    "compilerOptions": {
+        "target": "ES6",
+        "module": "amd",
+        "moduleResolution": "node",
+        "lib": [
+            "DOM",
+            "ES2023",
+        ],
+        "allowJs": true,
+        "typeRoots": [
+            "./node_modules/@types",
+            "./node_modules/@webgpu/types", 
+            "./types",
+        ],
+        "rootDirs": [
+            "sasrc",
+            "src",
+            "szsrc",
+        ],
+        "outDir": "build",
+        "outFile": "build/Scripts/terrain-system.js",
+        "strict": true,
+        "skipLibCheck": true,
+        "preserveConstEnums": true,
+        "strictPropertyInitialization": false,
+        "esModuleInterop": true,
+        "inlineSourceMap": true,
+        "inlineSources": true,
+        "experimentalDecorators": true,
+        "forceConsistentCasingInFileNames": true,
+    },
+    "exclude": [
+        "node_modules",
+        "playcanvas",
+        "ammojs",
+        "ammojs-typed",
+        "./build/**",
+        "./src/**/*.test.*",
+        "./src/**/*.todo.*",
+    ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "zalive-client",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "push": "node node_modules/playcanvas-sync/pcsync.js pushAll --yes",
+    "amd-build:debug": "tsc --project tsconfig.debug.amd.json",
+    "amd-watch-push:debug": "npm run amd-build:debug && tsc-watch -p tsconfig.debug.amd.json --onSuccess \"npm run push\""
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@microsoft/signalr": "^7.0.12",
+    "playcanvas": "^2.1.0",
+    "playcanvas-sync": "^1.1.1",
+    "tsc-watch": "^6.0.4",
+    "typescript": "^5.1.6"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.48",
+    "terser": "^5.19.3"
+  }
+}
