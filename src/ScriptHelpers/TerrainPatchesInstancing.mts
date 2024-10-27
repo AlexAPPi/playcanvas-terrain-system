@@ -72,18 +72,39 @@ export class TerrainPathcesInstancing extends PatchInstancing<pcx.MeshInstance> 
                                 
                                 chunkObject.instancingCount = chunk.count;
 
-                                if (chunk.hasChanges) {
+                                if (chunk.hasChanges && chunkObject.instancingData) {
 
-                                    // update vertex buffer
-                                    // TODO: unlock for chunk
-                                    if (chunkObject.instancingData) {
-                                        chunkObject.instancingData.vertexBuffer?.unlock();
-                                    }
+                                    // TODO: performance improvement
+                                    //chunkObject.instancingData.vertexBuffer?.unlock();
+                                    
+                                    const length = chunk.count * 2;
+                                    const vertexBuffer = chunkObject.instancingData.vertexBuffer;
+
+                                    this._writeBuffer(vertexBuffer, chunk.data, length);
                                 }
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    private _writeBuffer(vertexBuffer: pcx.VertexBuffer | null, data: Uint16Array, length: int) {
+
+        if (vertexBuffer) {
+
+            const device = vertexBuffer.device;
+
+            if (device.isWebGL2) {
+                const gl = (device as pcx.WebglGraphicsDevice).gl;
+                gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer.impl.bufferId);
+                gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, length);
+            }
+            else if (device.isWebGPU) {
+                const wgpu   = (device as any).wgpu as GPUDevice;
+                const buffer = vertexBuffer.impl.buffer as GPUBuffer;
+                wgpu.queue.writeBuffer(buffer, 0, data, 0, length);
             }
         }
     }

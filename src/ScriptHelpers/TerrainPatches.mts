@@ -6,6 +6,7 @@ import { int } from "../Shared/Types.mjs";
 import { ISingleLodInfo } from "../TerrainSystem/LodInfo.mjs";
 import { instDataSize, TInstCoordsOffsetArrType } from "../TerrainSystem/PatchInstancing.mjs";
 import CompressedPatchedHeightMap from "../TerrainSystem/CompressedPatchedHeightMap.mjs";
+import { IZone } from "../TerrainSystem/IZone.mjs";
 
 export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBufferBasic> {
 
@@ -13,9 +14,9 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
     private _sharedIndexBuffer: pcx.IndexBuffer;
     private _sharedVertexBuffer: pcx.VertexBuffer;
 
-    public updateHeights(minX: int, maxX: int, minZ: int, maxZ: int) {
-        super.updateHeights(minX, maxX, minZ, maxZ);
-        this._updateHeightMap(minX, maxX, minZ, maxZ);
+    public updateHeights(zone: IZone) {
+        super.updateHeights(zone);
+        this._updateHeightMap(zone);
     }
 
     private _syncPatchHeights(patchX: int, patchZ: int) {
@@ -67,30 +68,10 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         }
     }
 
-    private _updateHeightMap(minX: int, maxX: int, minZ: int, maxZ: int) {
-
-        if (minX < 0) minX = 0;
-        if (minZ < 0) minZ = 0;
-        if (maxX > this.terrain.width) maxX = this.terrain.width;
-        if (maxZ > this.terrain.depth) maxZ = this.terrain.depth;
-
-        const minPatchX = Math.ceil(minX / this.terrain.patchSize) - (minX % this.terrain.patchSize > 0 ? 1 : 0);
-        const minPatchZ = Math.ceil(minZ / this.terrain.patchSize) - (minZ % this.terrain.patchSize > 0 ? 1 : 0);
-        const maxPatchX = Math.ceil(maxX / this.terrain.patchSize) - (maxX % this.terrain.patchSize > 0 ? 1 : 0);
-        const maxPatchZ = Math.ceil(maxZ / this.terrain.patchSize) - (maxZ % this.terrain.patchSize > 0 ? 1 : 0);
-
-        const normalizeMinX = Math.max(minPatchX, 0);
-        const normalizeMinZ = Math.max(minPatchZ, 0);
-        const normalizeMaxX = Math.min(maxPatchX + 1, this.terrain.numPatchesX);
-        const normalizeMaxZ = Math.min(maxPatchZ + 1, this.terrain.numPatchesZ);
-
-        for (let z = normalizeMinZ; z < normalizeMaxZ; z++) {
-
-            for (let x = normalizeMinX; x < normalizeMaxX; x++) {
-            
-                this._syncPatchHeights(x, z);
-            }
-        }
+    private _updateHeightMap(zone: IZone) {
+        this.forEach(zone, (patchIndex, x, z) => {
+            this._syncPatchHeights(x, z);
+        });
     }
 
     protected _createPatchBuffer(patchIndex: int, baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lod: IPatchLod) {
@@ -251,6 +232,8 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
 
     private _initHeightMapTexture(app: pcx.AppBase) {
 
+        this._heightMap?.destroy();
+
         const dataChunkSize = this.terrain.heightMap.dataChunkSize;
         const chunks        = this.terrain.heightMap.getChunksBuffers(Uint8Array);
 
@@ -261,8 +244,8 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
             mipmaps: false,
             minFilter: pc.FILTER_LINEAR,
             magFilter: pc.FILTER_LINEAR,
-            addressU: pc.ADDRESS_MIRRORED_REPEAT,
-            addressV: pc.ADDRESS_MIRRORED_REPEAT,
+            addressU: pc.ADDRESS_CLAMP_TO_EDGE,
+            addressV: pc.ADDRESS_CLAMP_TO_EDGE,
             addressW: pc.ADDRESS_CLAMP_TO_EDGE,
             flipY: app.graphicsDevice.isWebGPU,
             arrayLength: chunks.length,
@@ -324,10 +307,10 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         super.updateMaterial(material);
     }
 
-    public update(app: pcx.AppBase, entity: pcx.Entity, material: pcx.StandardMaterial) {
+    public init(app: pcx.AppBase, entity: pcx.Entity, material: pcx.StandardMaterial) {
         this._initHeightMapTexture(app);
         this._updateIndexBuffer(app.graphicsDevice);
         this._updateVertexBuffer(app.graphicsDevice);
-        super.update(app, entity, material);
+        super.init(app, entity, material);
     }
 }

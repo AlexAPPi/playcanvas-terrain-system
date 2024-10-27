@@ -1,43 +1,48 @@
 import type { float, int } from "../Shared/Types.mjs";
 import AbsPatchedHeightMap, { getOrThrowDataChunkSize, IReadonlyAbsPatchedHeightMapTypped } from "./AbsPatchedHeightMap.mjs";
+import { defaultHeightVertexSize } from "./HeightMap.mjs";
 
-export type TCompressAlgoritm = 'x2' | 'x4';
+export type TCompressAlgoritm = "x2" | "x4";
+export type THeightMapArrayTypeBag<T extends TCompressAlgoritm> = T extends "x2" ? Uint16Array : Uint8Array;
 
-export class CompressedPatchedHeightMap extends AbsPatchedHeightMap<Uint16Array | Uint8Array> implements IReadonlyAbsPatchedHeightMapTypped<Uint16Array | Uint8Array> {
+export class CompressedPatchedHeightMap<TTCompressAlgoritm extends TCompressAlgoritm>
+     extends AbsPatchedHeightMap<THeightMapArrayTypeBag<TTCompressAlgoritm>>
+  implements IReadonlyAbsPatchedHeightMapTypped<THeightMapArrayTypeBag<TTCompressAlgoritm>> {
 
-    private _compressAlgoritm: TCompressAlgoritm;
+    private _compressAlgoritm: TTCompressAlgoritm;
     private _patchXBatchSize: int;
     private _maxSafeFactor: int;
 
     public get compressAlgoritm() { return this._compressAlgoritm; }
 
-    private static createBuffer(width: int, depth: int, chunkSize: int, algoritm: TCompressAlgoritm): Uint16Array | Uint8Array {
+    private static createBuffer<TCompress extends TCompressAlgoritm>(width: int, depth: int, chunkSize: int, algoritm: TCompress): THeightMapArrayTypeBag<TCompress> {
 
         const numChunksX   = ((width - 1) / (chunkSize - 1)) | 0;
         const numChunksZ   = ((depth - 1) / (chunkSize - 1)) | 0;
         const chunkArrSize = chunkSize ** 2;
         const chunkCount   = numChunksX * numChunksZ;
-        const patchXBatchingCount = algoritm === 'x4' ? 4 : 2;
+        const patchXBatchingCount = algoritm === "x4" ? 4 : 2;
 
         if (numChunksX < patchXBatchingCount) {
             console.error("The chunkSize (%d) should be at least (%d) times smaller than the width (%d)\n", chunkSize, patchXBatchingCount, width);
             throw new Error();
         }
 
-        if (algoritm === 'x4') {
-            return new Uint8Array(chunkArrSize * chunkCount);
-        }
-
-        return new Uint16Array(chunkArrSize * chunkCount);
+        return (algoritm === "x2"
+            ? new Uint16Array(chunkArrSize * chunkCount)
+            : new Uint8Array(chunkArrSize * chunkCount)
+        ) as unknown as THeightMapArrayTypeBag<TCompress>;
     }
 
-    constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, algoritm: TCompressAlgoritm) {
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, algoritm: TTCompressAlgoritm);
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, algoritm: TTCompressAlgoritm, buffer: THeightMapArrayTypeBag<TTCompressAlgoritm>, itemSize?: int, itemHeightIndexOffset?: int);
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, algoritm: TTCompressAlgoritm, buffer?: THeightMapArrayTypeBag<TTCompressAlgoritm>, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
         const validDataChunkSize = getOrThrowDataChunkSize(patchSize, dataChunkSize);
-        const buffer = CompressedPatchedHeightMap.createBuffer(width, depth, validDataChunkSize, algoritm);
-        super(width, depth, patchSize, dataChunkSize, minHeight, maxHeight, buffer, 1, 0);
+        const tmpBuffer = buffer ?? CompressedPatchedHeightMap.createBuffer(width, depth, validDataChunkSize, algoritm);
+        super(width, depth, patchSize, dataChunkSize, minHeight, maxHeight, tmpBuffer, itemSize, itemHeightIndexOffset);
         this._compressAlgoritm = algoritm;
-        this._patchXBatchSize  = algoritm === 'x4' ? 4 : 2;
-        this._maxSafeFactor    = algoritm === 'x4' ? 0xff : 0xffff;
+        this._patchXBatchSize  = algoritm === "x4" ? 4 : 2;
+        this._maxSafeFactor    = algoritm === "x4" ? 0xff : 0xffff;
     }
 
     public override getChunkIndex(chunkX: int, chunkZ: int): int {
@@ -74,11 +79,11 @@ export class CompressedPatchedHeightMap extends AbsPatchedHeightMap<Uint16Array 
         return result;
     }
 
-    protected override _encodeHeightFactor(store: Uint16Array | Uint8Array, index: int, value: float) {
+    protected override _encodeHeightFactor(store: THeightMapArrayTypeBag<TTCompressAlgoritm>, index: int, value: float) {
         store[index] = Math.min(value * this._maxSafeFactor, this._maxSafeFactor);
     }
     
-    protected override _decodeHeightFactor(store: Uint16Array | Uint8Array, index: int) {
+    protected override _decodeHeightFactor(store: THeightMapArrayTypeBag<TTCompressAlgoritm>, index: int) {
         return store[index] / this._maxSafeFactor;
     }
     

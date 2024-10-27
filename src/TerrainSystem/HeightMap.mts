@@ -22,11 +22,11 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
     
     private _itemSize: int;
     private _itemHeightIndexOffset: int;
-
+    
     public get size()  { return this._width * this._depth; }
     public get width() { return this._width; }
     public get depth() { return this._depth; }
-    public get data()  { return this._data as Readonly<TData>; }
+    public get data()  { return this._data }
 
     public get itemSize()              { return this._itemSize; }
     public get itemHeightIndexOffset() { return this._itemHeightIndexOffset; }
@@ -73,51 +73,10 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
     }
 
     protected _encodeHeightFactor(store: TData, index: int, value: float) {
-
-        /*
-        // to RGB vector
-        if (heightMapHeightBlockSize === 3) {
-
-            if (value < 0 || value > 1) {
-                store[index * heightMapHeightBlockSize + 0] = 0;
-                store[index * heightMapHeightBlockSize + 1] = 0;
-                store[index * heightMapHeightBlockSize + 2] = 0;
-            }
-            else {
-        
-                const scaled = Math.floor(value * 16777215);
-                const r = (scaled >> 16) & 0xFF;
-                const g = (scaled >> 8) & 0xFF;
-                const b = (scaled & 0xFF);
-            
-                store[index * heightMapHeightBlockSize + 0] = r;
-                store[index * heightMapHeightBlockSize + 1] = g;
-                store[index * heightMapHeightBlockSize + 2] = b;
-            }
-
-            return;
-        }
-        */
-
         store[index] = value;
     }
     
     protected _decodeHeightFactor(store: Record<number, number>, index: int) {
-    
-        /*
-        // from RGB vector
-        if (heightMapHeightBlockSize === 3) {
-
-            const r = store[index * heightMapHeightBlockSize + 0];
-            const g = store[index * heightMapHeightBlockSize + 1];
-            const b = store[index * heightMapHeightBlockSize + 2];
-        
-            const scaled = (r << 16) | (g << 8) | b;
-            
-            return scaled / 16777215;
-        }
-        */
-        
         return store[index];
     }
     

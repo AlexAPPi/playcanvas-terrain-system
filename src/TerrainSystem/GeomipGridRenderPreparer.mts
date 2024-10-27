@@ -1,14 +1,26 @@
 import type { IVector3, RefObject, float, int } from "../Shared/Types.mjs";
-import Vector2Math from "../Shared/Vector2Math.mjs";
 import GeomipGridBuilder from "./GeomipGridBuilder.mjs";
 import { IPatchLod, defaultPatchLod } from "./LodManager.mjs";
 
-export type RenderPatchCallback = (visible: boolean, baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lodInfo: Readonly<IPatchLod>) => void;
-export type FrustumPointValidationCallback = (localX: float, localY: float, localZ: float, radius?: number) => boolean;
+export type PatchInitFunction = (baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lodInfo: Readonly<IPatchLod>) => void;
+export type RenderPreparerPatchFunction = (visible: boolean, baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lodInfo: Readonly<IPatchLod>) => void;
+export type FrustumSphereTestFunction = (localX: float, localY: float, localZ: float, radius: float) => boolean;
+
+export interface IGridPatchInitializer {
+    initPatch: PatchInitFunction,
+}
+
+export interface IGridPatchRenderPreparer {
+    preparePatch: RenderPreparerPatchFunction,
+}
+
+export interface IFrustum {
+    containsSphere: FrustumSphereTestFunction,
+}
 
 export class GeomipGridRenderPreparer extends GeomipGridBuilder {
 
-    public initPatches(callback: RenderPatchCallback) {
+    public initPatches(initializer: IGridPatchInitializer) {
         
         for (let patchZ = 0; patchZ < this.numPatchesZ; patchZ++) {
 
@@ -21,7 +33,7 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
                 const baseIndex  = info.start;
                 const baseVertex = minZ * this.width + minX;
                 
-                callback(true, baseIndex, baseVertex, info.count, patchX, patchZ, minX, minZ, this.patchSize, defaultPatchLod);
+                initializer.initPatch(baseIndex, baseVertex, info.count, patchX, patchZ, minX, minZ, this.patchSize, defaultPatchLod);
             }
         }
     }
@@ -34,7 +46,7 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
         this.lodManager.update(localCameraPos, this.heightMap, center);
     }
 
-    public eachPatchesForRender(callback: RenderPatchCallback, isPointInsideViewFrustum?: FrustumPointValidationCallback | undefined) {
+    public eachPatches(renderPreparer: IGridPatchRenderPreparer, frustum?: IFrustum) {
 
         for (let patchZ = 0; patchZ < this.numPatchesZ; patchZ++) {
 
@@ -43,7 +55,7 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
                 const minX = patchX * (this.patchSize - 1);
                 const minZ = patchZ * (this.patchSize - 1);
 
-                const visible = !!isPointInsideViewFrustum && this._isPatchInsideViewFrustumBySphere(patchX, patchZ, isPointInsideViewFrustum);
+                const visible = !!frustum && this._isPatchInsideViewFrustumBySphere(patchX, patchZ, frustum);
 
                 const plod = this.lodManager.getPatchLod(patchX, patchZ);
                 const C = plod.core;
@@ -56,12 +68,12 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
                 const baseIndex  = info.start;
                 const baseVertex = minZ * this.width + minX;
                 
-                callback(visible, baseIndex, baseVertex, info.count, patchX, patchZ, minX, minZ, this.patchSize, plod);
+                renderPreparer.preparePatch(visible, baseIndex, baseVertex, info.count, patchX, patchZ, minX, minZ, this.patchSize, plod);
             }
         }
     }
 
-    private _isPatchInsideViewFrustumBySphere(patchBaseX: int, patchBaseZ: int, isPointInsideViewFrustum: FrustumPointValidationCallback): boolean {
+    private _isPatchInsideViewFrustumBySphere(patchBaseX: int, patchBaseZ: int, frustum: IFrustum): boolean {
 
         const patchMinHeight = this.heightMap.getPatchMin(patchBaseX, patchBaseZ);
         const patchMaxHeight = this.heightMap.getPatchMax(patchBaseX, patchBaseZ);
@@ -78,7 +90,7 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
         const patchCenteredX = (-this.width / 2) + patchCenterX;
         const patchCenteredZ = (-this.depth / 2) + patchCenterZ;
 
-        return isPointInsideViewFrustum(patchCenteredX, patchCenterY, patchCenteredZ, radius);
+        return frustum.containsSphere(patchCenteredX, patchCenterY, patchCenteredZ, radius);
     }
 }
 

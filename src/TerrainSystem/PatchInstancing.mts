@@ -90,11 +90,11 @@ export class PatchInstancing<T extends IInstancingObejct> {
         this.data = new Array(terrain.lodInfo.length);
 
         for (let lodCore = 0; lodCore < this.data.length; lodCore++) {
-            this.data[lodCore] = this._buildInfoInstancing(lodCore, terrain.lodInfo[lodCore], this._patchCount, objectBuilder);
+            this.data[lodCore] = this._buildInfo(lodCore, terrain.lodInfo[lodCore], this._patchCount, objectBuilder);
         }
     }
 
-    private _buildInfoInstancing<T extends IInstancingObejct>(lodCore: int, lodInfo: Readonly<Readonly<LodInfo>>, patchCount: int, objectBuilder?: TBulder<T>): ISingleLodInfoInstancing<T>[][][][] {
+    private _buildInfo<T extends IInstancingObejct>(lodCore: int, lodInfo: Readonly<Readonly<LodInfo>>, patchCount: int, objectBuilder?: TBulder<T>): ISingleLodInfoInstancing<T>[][][][] {
 
         const arr: ISingleLodInfoInstancing<T>[][][][] = [];
     
@@ -113,7 +113,7 @@ export class PatchInstancing<T extends IInstancingObejct> {
                     for (let b = 0 ; b < BOTTOM ; b++) {
     
                         const info = lodInfo.info[l][r][t][b];
-                        const lod: IPatchLod  = {
+                        const lod: IPatchLod = {
                             distance: -1,
                             core: lodCore,
                             left: l,
@@ -146,6 +146,7 @@ export class PatchInstancing<T extends IInstancingObejct> {
     }
 
     public increment(lod: IPatchLod, x: int, z: int): ISingleLodInfoInstancing<T> {
+        
         const single = this.get(lod);
         const prevIndex = single.count;
         

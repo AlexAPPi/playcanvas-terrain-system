@@ -1,6 +1,6 @@
 import BigTerrainEditor, { bigTerrainEditorScriptName } from "./BigTerrainEditor.mjs";
 import BaseTerrain from "../TerrainSystem/Terrain.mjs";
-import TerrainRendererPreparer from "../ScriptHelpers/TerrainRendererPreparer.mjs";
+import TerrainRendererPreparer from "../ScriptHelpers/TerrainRenderPreparer.mjs";
 import { grassShaderChunks } from "../ScriptHelpers/GrassShaderChunks.mjs";
 
 const pos = new pc.Vec3();
@@ -223,7 +223,6 @@ export default Grass;
 export const grassScriptName = "grass";
 
 pc.registerScript(Grass, grassScriptName);
-
 
 Grass.attributes.add("terrainEntity", { type: 'entity' });
 Grass.attributes.add("base", { type: "number", default: 0, step: 1, precision: 0, min: 0 });

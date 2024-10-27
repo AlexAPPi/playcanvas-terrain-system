@@ -85,6 +85,13 @@ export const terrainCoordsChunkVS =
         return uv;
     }
 
+    vec2 clampTerrainXZ(vec2 xz) {
+        return vec2(
+            clamp(xz[0], 0.0, ${terrainSizeParamName}[0]),
+            clamp(xz[1], 0.0, ${terrainSizeParamName}[1])
+        );
+    }
+
     vec2 getTerrainXZ(ivec2 offset) {
         return dCurrentTerrainXZ + vec2(offset);
     }
@@ -164,7 +171,7 @@ export const terrainChunkUVVS =
 
     vec3 getTerrainChunkUV(ivec2 offset) {
 
-        vec2 xz = getTerrainXZ(offset);
+        vec2 xz = clampTerrainXZ(getTerrainXZ(offset));
 
         int chunkSize = int(${terrainHeightMapChunkSizeParamName});
         

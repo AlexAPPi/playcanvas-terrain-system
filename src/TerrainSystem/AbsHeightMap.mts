@@ -1,4 +1,6 @@
-import { float, int } from "../Shared/Types.mjs";
+import type { float, int } from "../Shared/Types.mjs";
+import AbsHeightMapFileIO, { IHeightMapFileImportOptions } from "./AbsHeightMapFileIO.mjs";
+import type { IZone } from "./IZone.mjs";
 
 export interface IReadonlyAbsHeightMap {
 
@@ -11,11 +13,13 @@ export interface IReadonlyAbsHeightMap {
     get(x: int, z: int): float;
     getFactor(x: int, z: int): float;
     getHeightInterpolated(x: float, z: float): float;
+    toFile(): Promise<Blob>;
     toCanvas(): HTMLCanvasElement;
+    toBuffer(buffer: Uint8Array | Uint8ClampedArray): void;
     toImage(type?: string | undefined, quality?: any): string;
 }
 
-export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
+export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadonlyAbsHeightMap, IZone {
 
     public abstract width: int;
     public abstract depth: int;
@@ -26,6 +30,12 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
     public abstract get(x: int, z: int): float;
     public abstract set(x: int, z: int, value: float): float;
     public abstract getFactor(x: int, z: int): float;
+
+    public readonly minX = 0;
+    public readonly minZ = 0;
+    
+    public get maxX() { return this.width; }
+    public get maxZ() { return this.depth; }
 
     public getHeightInterpolated(x: float, z: float) {
 
@@ -65,8 +75,17 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
     public divide(x: int, z: int, value: float, heightIfZero: float = 0) {
         return this.multiply(x, z, 1 / value, heightIfZero);
     }
-    
-    public toBuffer(buffer: Uint8ClampedArray): void {
+
+    public async fromFile(buffer: ArrayBuffer, options?: IHeightMapFileImportOptions) {
+        return await this.__importFromFile(this, buffer, options);
+    }
+
+    public async toFile() {
+        const buffer = await this.__exportToBuffer(this);
+        return new Blob([buffer], { type: "application/octet-stream" });
+    }
+
+    public toBuffer(buffer: Uint8Array | Uint8ClampedArray): void {
 
         const width  = this.width;
         const delta  = this.maxHeight - this.minHeight;
@@ -173,18 +192,18 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
         }
     }
     
-    public smoothZone(minX: int, maxX: int, minZ: int, maxZ: int, np: float, radius: int) {
+    public smoothZone(zone: IZone, np: float, radius: int) {
 
-        if (maxX < 0) return;
-        if (maxZ < 0) return;
+        if (zone.maxX < 0) return;
+        if (zone.maxZ < 0) return;
 
         if (np < 0 || np > 1) return;
         if (radius === 0) radius = 1;
 
-        if (minX < 0) minX = 0;
-        if (minZ < 0) minZ = 0;
-        if (maxX > this.width) maxX = this.width;
-        if (maxZ > this.depth) maxZ = this.depth;
+        const minX = Math.max(zone.minX, 0);
+        const minZ = Math.max(zone.minZ, 0);
+        const maxX = Math.min(zone.maxX, this.width);
+        const maxZ = Math.min(zone.maxZ, this.depth);
 
         const cp = 1 - np;
 
@@ -192,6 +211,9 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
 
             for (let z = minZ; z < maxZ; z++) {
 
+                const prevHeight = this.get(x, z);
+
+                let updtHeight;
                 let neighNumber  = 0;
                 let neighAverage = 0;
 
@@ -199,35 +221,31 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
 
                     for (let rz = -radius; rz <= radius; rz++) {
 
-                        if ((x + rx < 0) || (x + rx >= this.width)) continue;
-                        if ((z + rz < 0) || (z + rz >= this.depth)) continue;
+                        const innerX = (x + rx);
+                        const innerZ = (z + rz);
+
+                        if (innerX < 0 || innerX >= this.width) continue;
+                        if (innerZ < 0 || innerZ >= this.depth) continue;
+
+                        const height = (innerX === x && innerZ === z)
+                            ? prevHeight
+                            : this.get(innerX, innerZ);
 
                         neighNumber++;
-                        neighAverage += this.get((x + rx), (z + rz));
+                        neighAverage += height;
                     }
                 }
 
                 neighAverage /= neighNumber;
+                updtHeight = neighAverage * np + prevHeight * cp;
 
-                const smoothHeight = neighAverage * np + this.get(x, z) * cp;
-
-                this.set(x, z, smoothHeight);
+                this.set(x, z, updtHeight);
             }
         }
     }
 
-    /**
-     * Smooth the terrain. For each node, its X (determined by radius) neighbors' heights
-     * are averaged and will influence node's new height
-     * to the extent specified by <code>np</code>.
-     *
-     * @param np
-     *          To what extent neighbors influence the new height:
-     *          Value of 0 will ignore neighbors (no smoothing).
-     *          Value of 1 will ignore the node old height.
-     */
     public smooth(np: float, radius: int) {
-        this.smoothZone(0, this.width, 0, this.depth, np, radius);
+        this.smoothZone(this, np, radius);
     }
 
     public normalize(minHeight: float, maxHeight: float) {
@@ -255,30 +273,26 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
         type: '+' | '-' | '*' | '/',
         heightMap: AbsHeightMap,
         value: float,
-        minX: int,
-        maxX: int,
-        minZ: int,
-        maxZ: int,
-        coeffDiv: float = 100,
+        zone: IZone,
         heightIfZero: float = 0,
         minHeight: float | null = null,
         maxHeight: float | null = null
     ) {
-
-        if (maxX < 0) return;
-        if (maxZ < 0) return;
-
-        const lenX = maxX - minX;
-        const lenZ = maxZ - minZ;
+        
+        if (zone.maxX < 0) return;
+        if (zone.maxZ < 0) return;
+        
+        const lenX = zone.maxX - zone.minX;
+        const lenZ = zone.maxZ - zone.minZ;
 
         if (lenX < 1 || lenZ < 1 || value === 0) {
             return;
         }
 
-        const fixedMinX = Math.max(minX, 0);
-        const fixedMinZ = Math.max(minZ, 0);
-        const fixedMaxX = Math.min(maxX, this.width);
-        const fixedMaxZ = Math.min(maxZ, this.depth);
+        const fixedMinX = Math.max(zone.minX, 0);
+        const fixedMinZ = Math.max(zone.minZ, 0);
+        const fixedMaxX = Math.min(zone.maxX, this.width);
+        const fixedMaxZ = Math.min(zone.maxZ, this.depth);
 
         const coeffFactorX = (heightMap.width - 1) / lenX;
         const coeffFactorZ = (heightMap.depth - 1) / lenZ;
@@ -287,10 +301,10 @@ export abstract class AbsHeightMap implements IReadonlyAbsHeightMap {
 
             for (let x = fixedMinX; x < fixedMaxX; x++) {
 
-                const x2 = (coeffFactorX * (x - minX)) | 0;
-                const z2 = (coeffFactorZ * (z - minZ)) | 0;
-                const coeff = heightMap.get(x2, z2) / coeffDiv;
-                const smoothAppendValue = coeff * value;
+                const x2 = (coeffFactorX * (x - zone.minX)) | 0;
+                const z2 = (coeffFactorZ * (z - zone.minZ)) | 0;
+                const height = heightMap.get(x2, z2);
+                const smoothAppendValue = height * value;
 
                 const oldHeight = this.get(x, z) || heightIfZero;
 

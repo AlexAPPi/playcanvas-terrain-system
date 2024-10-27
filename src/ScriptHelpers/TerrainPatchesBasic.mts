@@ -1,20 +1,20 @@
-import { RenderPatchCallback } from "../TerrainSystem/GeomipGridRenderPreparer.mjs";
+import type { int } from "../Shared/Types.mjs";
 import { IPatchLod } from "../TerrainSystem/LodManager.mjs";
 import BaseTerrain from "../TerrainSystem/Terrain.mjs";
 import { ISingleLodInfo } from "../TerrainSystem/LodInfo.mjs";
 import { TerrainPathcesInstancing } from "./TerrainPatchesInstancing.mjs";
 import { TInstCoordsOffsetArrType } from "../TerrainSystem/PatchInstancing.mjs";
+import { IGridPatchInitializer } from "../TerrainSystem/GeomipGridRenderPreparer.mjs";
+import { IZone } from "../TerrainSystem/IZone.mjs";
+
+export type TForEachPatchCallback = (patchIndex: int, x: int, z: int) => void | boolean;
 
 export class TerrainPatchBufferBasic {
 
     readonly minX: number;
     readonly minZ: number;
     readonly size: number;
-
     readonly index: number;
-
-    readonly useIndices: Uint16Array | Uint32Array | false;
-    readonly useIndicesFormat: number | false;
 
     public visible: boolean;
 
@@ -175,15 +175,15 @@ export default abstract class TerrainPatchesBasic<TPatchBuffer extends TerrainPa
         this.updateMeshes();
     }
 
-    public updateDependencies(minX: number, maxX: number, minZ: number, maxZ: number) {
+    public forEach(zone: IZone, callback: TForEachPatchCallback) {
 
-        if (maxX < 0) return;
-        if (maxZ < 0) return;
+        if (zone.maxX < 0) return;
+        if (zone.maxZ < 0) return;
 
-        if (minX < 0) minX = 0;
-        if (minZ < 0) minZ = 0;
-        if (maxX > this.terrain.width) maxX = this.terrain.width;
-        if (maxZ > this.terrain.depth) maxZ = this.terrain.depth;
+        const minX = Math.max(zone.minX, 0);
+        const minZ = Math.max(zone.minZ, 0);
+        const maxX = Math.min(zone.maxX, this.terrain.width);
+        const maxZ = Math.min(zone.maxZ, this.terrain.depth);
 
         const minPatchX = Math.ceil(minX / this.terrain.patchSize) - (minX % this.terrain.patchSize > 0 ? 1 : 0);
         const minPatchZ = Math.ceil(minZ / this.terrain.patchSize) - (minZ % this.terrain.patchSize > 0 ? 1 : 0);
@@ -194,57 +194,48 @@ export default abstract class TerrainPatchesBasic<TPatchBuffer extends TerrainPa
         const normalizeMinZ = Math.max(minPatchZ, 0);
         const normalizeMaxX = Math.min(maxPatchX + 1, this.terrain.numPatchesX);
         const normalizeMaxZ = Math.min(maxPatchZ + 1, this.terrain.numPatchesZ);
-        const now = performance.now();
 
         for (let z = normalizeMinZ; z < normalizeMaxZ; z++) {
 
             for (let x = normalizeMinX; x < normalizeMaxX; x++) {
 
                 const patchIndex = z * this.terrain.numPatchesX + x;
-                const patchBuffer = this._bufferArray[patchIndex];
 
-                patchBuffer.lastChangeTime = now;
-                patchBuffer.lastChangeAttachTime = now;
+                if (callback(patchIndex, x, z) === false) {
+                    return;
+                }
             }
         }
+    }
+
+    public updateDependencies(zone: IZone) {
+
+        const now = performance.now();
+
+        this.forEach(zone, (patchIndex) => {
+            
+            const patchBuffer = this._bufferArray[patchIndex];
+
+            patchBuffer.lastChangeTime = now;
+            patchBuffer.lastChangeAttachTime = now;
+        });
 
         this._lastChangeTime = now;
         this._lastChangeAttachTime = now;
     }
 
-    public updateHeights(minX: number, maxX: number, minZ: number, maxZ: number) {
+    public updateHeights(zone: IZone) {
 
-        if (maxX < 0) return;
-        if (maxZ < 0) return;
-
-        if (minX < 0) minX = 0;
-        if (minZ < 0) minZ = 0;
-        if (maxX > this.terrain.width) maxX = this.terrain.width;
-        if (maxZ > this.terrain.depth) maxZ = this.terrain.depth;
-
-        const minPatchX = Math.ceil(minX / this.terrain.patchSize) - (minX % this.terrain.patchSize > 0 ? 1 : 0);
-        const minPatchZ = Math.ceil(minZ / this.terrain.patchSize) - (minZ % this.terrain.patchSize > 0 ? 1 : 0);
-        const maxPatchX = Math.ceil(maxX / this.terrain.patchSize) - (maxX % this.terrain.patchSize > 0 ? 1 : 0);
-        const maxPatchZ = Math.ceil(maxZ / this.terrain.patchSize) - (maxZ % this.terrain.patchSize > 0 ? 1 : 0);
-
-        const normalizeMinX = Math.max(minPatchX, 0);
-        const normalizeMinZ = Math.max(minPatchZ, 0);
-        const normalizeMaxX = Math.min(maxPatchX + 1, this.terrain.numPatchesX);
-        const normalizeMaxZ = Math.min(maxPatchZ + 1, this.terrain.numPatchesZ);
         const now = performance.now();
 
-        for (let z = normalizeMinZ; z < normalizeMaxZ; z++) {
+        this.forEach(zone, (patchIndex) => {
+            
+            const patchBuffer = this._bufferArray[patchIndex];
 
-            for (let x = normalizeMinX; x < normalizeMaxX; x++) {
-
-                const patchIndex  = z * this.terrain.numPatchesX + x;
-                const patchBuffer = this._bufferArray[patchIndex];
-
-                patchBuffer.lastChangeTime = now;
-                patchBuffer.lastChangeHeightsTime = now;
-                patchBuffer.heightsUpdated = true;
-            }
-        }
+            patchBuffer.lastChangeTime = now;
+            patchBuffer.lastChangeHeightsTime = now;
+            patchBuffer.heightsUpdated = true;
+        });
 
         this._lastChangeTime = now;
         this._lastChangeHeightsTime = now;
@@ -357,20 +348,27 @@ export default abstract class TerrainPatchesBasic<TPatchBuffer extends TerrainPa
         this._material = material;
     }
 
-    public update(app: pcx.AppBase, entity: pcx.Entity, material: pcx.StandardMaterial) {
+    public init(app: pcx.AppBase, entity: pcx.Entity, material: pcx.StandardMaterial) {
+
+        if (this._init) {
+            throw new Error('The terrain patches was initialized earlier');
+        }
 
         this._init = true;
         this._app = app;
         this._entity = entity;
 
-        const patchCallback: RenderPatchCallback = (visible, baseIndex, baseVertex, count, patchX, patchZ, minX, minZ, size, lod) => {
-            const patchIndex = patchZ * this.terrain.numPatchesX + patchX;
-            const buffer = this._createPatchBuffer(patchIndex, baseIndex, baseVertex, count, patchX, patchZ, minX, minZ, size, lod);
-            this._addPatchBuffer(patchIndex, buffer);
+        // for other language use internal class
+        const initializer: IGridPatchInitializer = {
+            initPatch: (baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lodInfo: Readonly<IPatchLod>) => {
+                const patchIndex = patchZ * this.terrain.numPatchesX + patchX;
+                const buffer = this._createPatchBuffer(patchIndex, baseIndex, baseVertex, count, patchX, patchZ, minX, minZ, size, lodInfo);
+                this._addPatchBuffer(patchIndex, buffer);
+            }
         }
 
         this.updateMaterial(material);
-        this.terrain.initPatches(patchCallback);
+        this.terrain.initPatches(initializer);
         this.updateMeshes();
     }
 }

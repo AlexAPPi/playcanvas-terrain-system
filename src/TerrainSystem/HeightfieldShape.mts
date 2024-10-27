@@ -1,5 +1,6 @@
 import { float, int, IVector3, RefObject } from "../Shared/Types.mjs";
 import { IReadonlyAbsPatchedHeightMap } from "./AbsPatchedHeightMap.mjs";
+import { IZone } from "./IZone.mjs";
 import TerrainRaycastResult from "./TerrainRaycastResult.mjs";
 import Triangle from "./Triangle.mjs";
 
@@ -33,13 +34,9 @@ const debugPositions = new Array(16);
 
 let debugTransformIsIdentity = true;
 
-export interface IAABB {
-    minX: int,
-    maxX: int,
+export interface IAABB extends IZone {
     minY: float,
     maxY: float,
-    minZ: int,
-    maxZ: int,
 }
 
 function debugDrawTriangleLines(tri: pcx.Tri, color = pc.Color.YELLOW) {
@@ -129,11 +126,28 @@ export default class HeightfieldShape {
     private _heightMap: IReadonlyAbsPatchedHeightMap;
     private _beginPos: pcx.Vec3;
     private _endPos: pcx.Vec3;
+    private _boundingBox: IAABB;
 
     constructor(heightMap: IReadonlyAbsPatchedHeightMap) {
         this._heightMap = heightMap;
         this._beginPos = new pc.Vec3();
         this._endPos = new pc.Vec3();
+        this.updateBoundingBox();
+    }
+
+    public updateBoundingBox() {
+        
+        const halfWidth = this._heightMap.width / 2;
+        const halfDepth = this._heightMap.depth / 2;
+
+        this._boundingBox = {
+            minX: -halfWidth,
+            minY: this._heightMap.minHeight,
+            minZ: -halfDepth,
+            maxX: halfWidth,
+            maxY: this._heightMap.maxHeight,
+            maxZ: halfDepth,
+        }
     }
 
     protected _triangleIntersectsRay(tri: Triangle, ray: pcx.Ray, bestResult: TerrainRaycastResult): boolean {
@@ -199,14 +213,25 @@ export default class HeightfieldShape {
         const x = rs.prevX;
         const z = rs.prevZ;
 
-        if (x < 0 || z < 0 || x >= this._heightMap.width || z >= this._heightMap.depth) {
+        if (x < 0 || z < 0 || x >= this._heightMap.width - 1 || z >= this._heightMap.depth - 1) {
 			return false;
 		}
 
+        const xFan2 = x % 2 === 0;
+        const zFan2 = z % 2 === 0;
+
+        let index0, index1, index2;
+
         {
-            const index0 = (z + 0) * this._heightMap.width + (x + 0);
-            const index1 = (z + 1) * this._heightMap.width + (x + 0);
-            const index2 = (z + 0) * this._heightMap.width + (x + 1);
+            if (xFan2 !== zFan2) {
+                index0 = (z + 0) * this._heightMap.width + (x + 0);
+                index1 = (z + 1) * this._heightMap.width + (x + 0);
+                index2 = (z + 0) * this._heightMap.width + (x + 1);
+            } else {
+                index0 = (z + 0) * this._heightMap.width + (x + 0);
+                index1 = (z + 1) * this._heightMap.width + (x + 1);
+                index2 = (z + 0) * this._heightMap.width + (x + 1);
+            }
 
             this._assignPosition(index0, tmpPos1);
             this._assignPosition(index1, tmpPos2);
@@ -224,9 +249,15 @@ export default class HeightfieldShape {
         }
 
         {
-            const index0 = (z + 0) * this._heightMap.width + (x + 1);
-            const index1 = (z + 1) * this._heightMap.width + (x + 0);
-            const index2 = (z + 1) * this._heightMap.width + (x + 1);
+            if (xFan2 !== zFan2) {
+                index0 = (z + 0) * this._heightMap.width + (x + 1);
+                index1 = (z + 1) * this._heightMap.width + (x + 0);
+                index2 = (z + 1) * this._heightMap.width + (x + 1);
+            } else {
+                index0 = (z + 0) * this._heightMap.width + (x + 0);
+                index1 = (z + 1) * this._heightMap.width + (x + 0);
+                index2 = (z + 1) * this._heightMap.width + (x + 1);
+            }
 
             this._assignPosition(index0, tmpPos1);
             this._assignPosition(index1, tmpPos2);
@@ -239,28 +270,22 @@ export default class HeightfieldShape {
             triangle.set(tmpPos1, tmpPos2, tmpPos3);
         }
 
-        return this._triangleIntersectsRay(triangle, ray, result);
+        if (this._triangleIntersectsRay(triangle, ray, result)) {
+            return true;
+        }
+
+        return false;
     }
 
     private _intersectsRay(localRay: pcx.Ray, result: TerrainRaycastResult = new TerrainRaycastResult()): boolean {
 
-        const halfWidth = this._heightMap.width / 2;
-        const halfDepth = this._heightMap.depth / 2;
-
-        if (!intersectsRayBox({
-            minX: -halfWidth,
-            minY: this._heightMap.minHeight,
-            minZ: -halfDepth,
-            maxX: halfWidth,
-            maxY: this._heightMap.maxHeight,
-            maxZ: halfDepth,
-        }, localRay)) {
+        if (!intersectsRayBox(this._boundingBox, localRay)) {
             return false;
         }
 
         this._beginPos.copy(localRay.origin);
-        this._beginPos.x += halfWidth;
-        this._beginPos.z += halfDepth;
+        this._beginPos.x += this._boundingBox.maxX;
+        this._beginPos.z += this._boundingBox.maxZ;
 
         this._endPos.copy(localRay.direction).add(this._beginPos);
 

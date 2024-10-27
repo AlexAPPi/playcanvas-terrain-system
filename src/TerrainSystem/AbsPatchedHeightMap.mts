@@ -1,16 +1,17 @@
 import type { float, int } from "../Shared/Types.mjs";
-import { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
+import type { IZone } from "./IZone.mjs";
+import type { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
 import HeightMap, { HeightMapArrType, defaultHeightVertexSize, IReadonlyHeightMap } from "./HeightMap.mjs";
 
 export interface IReadonlyAbsPatchedHeightMap extends IReadonlyAbsHeightMap {
 
-    dataChunkSize: int;
-    dataNumChunksX: int;
-    dataNumChunksZ: int;
-    dataChunkSizeFactor: float;
-    patchSize: int;
-    numPatchesX: int;
-    numPatchesZ: int;
+    readonly dataChunkSize: int;
+    readonly dataNumChunksX: int;
+    readonly dataNumChunksZ: int;
+    readonly dataChunkSizeFactor: float;
+    readonly patchSize: int;
+    readonly numPatchesX: int;
+    readonly numPatchesZ: int;
 
     getMin(): float;
     getMax(): float;
@@ -24,8 +25,7 @@ export interface IReadonlyAbsPatchedHeightMap extends IReadonlyAbsHeightMap {
     getPatchMax(patchBaseX: int, patchBaseZ: int): float;
     getPatchMinFactor(patchBaseX: int, patchBaseZ: int): float;
     getPatchMaxFactor(patchBaseX: int, patchBaseZ: int): float;
-    recalculateMinMax(minX: int, maxX: int, minZ: int, maxZ: int): void;
-    
+
     getChunkIndex(chunkX: int, chunkZ: int): int;
     getChunkBuffer(type: Float32ArrayConstructor, chunkX: int, chunkZ: int): Float32Array;
     getChunkBuffer(type: Uint16ArrayConstructor, chunkX: int, chunkZ: int): Uint16Array;
@@ -221,7 +221,7 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
     }
 
     public recalculateAABB() {
-        
+
         this._minHeightCoord[0] = 0;
         this._minHeightCoord[1] = 0;
         this._maxHeightCoord[0] = 0;
@@ -255,15 +255,15 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
         }
     }
 
-    public recalculateMinMax(minX: int, maxX: int, minZ: int, maxZ: int, aabb: boolean = true) {
+    public recalculateMinMax(zone: IZone): void {
+        
+        if (zone.maxX < 0) return;
+        if (zone.maxZ < 0) return;
 
-        if (maxX < 0) return;
-        if (maxZ < 0) return;
-
-        const fixedMinX = Math.max(minX, 0);
-        const fixedMinZ = Math.max(minZ, 0);
-        const fixedMaxX = Math.min(maxX, this.width);
-        const fixedMaxZ = Math.min(maxZ, this.depth);
+        const fixedMinX = Math.max(zone.minX, 0);
+        const fixedMinZ = Math.max(zone.minZ, 0);
+        const fixedMaxX = Math.min(zone.maxX, this.width);
+        const fixedMaxZ = Math.min(zone.maxZ, this.depth);
 
         for (let z = fixedMinZ; z < fixedMaxZ; z += this._patchSize) {
 
@@ -312,10 +312,6 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
                 this._minMaxHeightCoords[maxIndex]     = maxX;
                 this._minMaxHeightCoords[maxIndex + 1] = maxZ;
             }
-        }
-
-        if (aabb) {
-            this.recalculateAABB();
         }
     }
 }

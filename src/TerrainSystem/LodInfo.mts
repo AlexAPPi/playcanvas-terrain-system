@@ -63,3 +63,5 @@ export class LodInfo {
         }
     }
 }
+
+export default LodInfo;
