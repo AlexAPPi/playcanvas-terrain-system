@@ -22,8 +22,7 @@ npm run amd-watch-push:debug // for watch
 
 https://forum.playcanvas.com/t/terrain-component-for-editor/36052/33
 
-![image](https://github.com/user-attachments/assets/ef6cb338-d4bf-45fc-9ccf-7fef4a175475)
-![image](https://github.com/user-attachments/assets/02a4b668-c0c5-451a-ae9a-38315ebdf600)
-![image](https://github.com/user-attachments/assets/93b4272f-5515-4ec0-a5d5-753b647bfa11)
-![image](https://github.com/user-attachments/assets/429ee6a9-2657-446e-b344-781ec4a1cf5c)
-![image](https://github.com/user-attachments/assets/9dd9515a-751d-488c-9c43-47da0cc13579)
+![video](https://github.com/user-attachments/assets/9c8e7031-457d-4a53-b7d3-aab3502ba41f)
+![video](https://github.com/user-attachments/assets/25ee67ad-827c-4b53-8498-0de2717ff81e)
+![img1_2](https://github.com/user-attachments/assets/114d2267-4c6e-4a3c-b4c7-c8ea1e2dff0d)
+![img2_2](https://github.com/user-attachments/assets/45e41aca-a270-4559-9743-00c08cc4d407)
