@@ -1,3 +1,5 @@
+<b>Terrain system (support WebGL2 and WebGPU)</b>
+
 You can take the compiled code and use it in your project: https://github.com/AlexAPPi/playcanvas-terrain-system/blob/main/build/Scripts/terrain-system.js
 
 Or make changes to it:
