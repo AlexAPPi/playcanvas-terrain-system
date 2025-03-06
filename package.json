@@ -1,6 +1,6 @@
 {
-  "name": "zalive-client",
-  "version": "1.0.0",
+  "name": "playcanvas-terrain-system",
+  "version": "1.0.1",
   "description": "",
   "main": "index.js",
   "type": "module",
