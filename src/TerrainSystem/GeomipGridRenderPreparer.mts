@@ -48,12 +48,15 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
 
     public eachPatches(renderPreparer: IGridPatchRenderPreparer, frustum?: IFrustum) {
 
+        const patchSizeNorm = this.patchSize - 1;
+
         for (let patchZ = 0; patchZ < this.numPatchesZ; patchZ++) {
+
+            const minZ = patchZ * patchSizeNorm;
 
             for (let patchX = 0; patchX < this.numPatchesX; patchX++) {
 
-                const minX = patchX * (this.patchSize - 1);
-                const minZ = patchZ * (this.patchSize - 1);
+                const minX = patchX * patchSizeNorm;
 
                 const visible = !!frustum && this._isPatchInsideViewFrustumBySphere(patchX, patchZ, frustum);
 

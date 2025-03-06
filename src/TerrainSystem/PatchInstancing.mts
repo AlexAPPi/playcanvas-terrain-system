@@ -5,7 +5,7 @@ import BaseTerrain from "./Terrain.mjs";
 
 export const instDataSize = 2;
 
-export interface IInstancingObejct {
+export interface IInstancingObject {
 }
 
 // We can use uint8, but we only use 2 bytes,
@@ -13,16 +13,16 @@ export interface IInstancingObejct {
 export type  TInstCoordsOffsetArrType = Uint16Array;
 export const TInstCoordsOffsetArrType = Uint16Array;
 
-export type TBulder<T extends IInstancingObejct> = (lodInfo: IPatchLod, primitiveInfo: ISingleLodInfo, instancingData: TInstCoordsOffsetArrType, maxInstancingCount: int) => T | null;
-export type TDestructor<T extends IInstancingObejct> = (object: T) => void;
-export type TSelector<T extends IInstancingObejct> = (item: ISingleLodInfoInstancing<T>) => void;
+export type TBulder<T extends IInstancingObject> = (lodInfo: IPatchLod, primitiveInfo: ISingleLodInfo, instancingData: TInstCoordsOffsetArrType, maxInstancingCount: int) => T | null;
+export type TDestructor<T extends IInstancingObject> = (object: T) => void;
+export type TSelector<T extends IInstancingObject> = (item: ISingleLodInfoInstancing<T>) => void;
 
 /**
  * Lod data type with indexes [LODCORE][LEFT][RIGHT][TOP][BOTTOM]
  */
-export type TData<T extends IInstancingObejct> = ISingleLodInfoInstancing<T>[][][][][];
+export type TData<T extends IInstancingObject> = ISingleLodInfoInstancing<T>[][][][][];
 
-export interface ISingleLodInfoInstancing<T extends IInstancingObejct> {
+export interface ISingleLodInfoInstancing<T extends IInstancingObject> {
     vertexBaseIndex: int;
     vertexCount: int;
     data: Uint16Array;
@@ -31,7 +31,7 @@ export interface ISingleLodInfoInstancing<T extends IInstancingObejct> {
     hasChanges: boolean;
 }
 
-export class PatchInstancing<T extends IInstancingObejct> {
+export class PatchInstancing<T extends IInstancingObject> {
 
     private _patchCount: int;
 
@@ -86,7 +86,6 @@ export class PatchInstancing<T extends IInstancingObejct> {
     public buildFromTerrain(terrain: BaseTerrain, objectBuilder?: TBulder<T>) {
 
         this._patchCount = terrain.numPatchesX * terrain.numPatchesZ;
-
         this.data = new Array(terrain.lodInfo.length);
 
         for (let lodCore = 0; lodCore < this.data.length; lodCore++) {
@@ -94,21 +93,21 @@ export class PatchInstancing<T extends IInstancingObejct> {
         }
     }
 
-    private _buildInfo<T extends IInstancingObejct>(lodCore: int, lodInfo: Readonly<Readonly<LodInfo>>, patchCount: int, objectBuilder?: TBulder<T>): ISingleLodInfoInstancing<T>[][][][] {
+    private _buildInfo<T extends IInstancingObject>(lodCore: int, lodInfo: Readonly<Readonly<LodInfo>>, patchCount: int, objectBuilder?: TBulder<T>): ISingleLodInfoInstancing<T>[][][][] {
 
-        const arr: ISingleLodInfoInstancing<T>[][][][] = [];
+        const arr: ISingleLodInfoInstancing<T>[][][][] = new Array(LEFT);
     
         for (let l = 0 ; l < LEFT ; l++) {
     
-            arr[l] = [];
+            arr[l] = new Array(RIGHT);
     
             for (let r = 0 ; r < RIGHT ; r++) {
     
-                arr[l][r] = [];
+                arr[l][r] = new Array(TOP);
     
                 for (let t = 0 ; t < TOP ; t++) {
-    
-                    arr[l][r][t] = [];
+                    
+                    arr[l][r][t] = new Array(BOTTOM);
     
                     for (let b = 0 ; b < BOTTOM ; b++) {
     
@@ -123,14 +122,14 @@ export class PatchInstancing<T extends IInstancingObejct> {
                         };
 
                         const data   = new TInstCoordsOffsetArrType(patchCount * instDataSize);
-                        const obejct = objectBuilder ? objectBuilder(lod, info, data, patchCount) : null;
+                        const object = objectBuilder ? objectBuilder(lod, info, data, patchCount) : null;
 
                         arr[l][r][t][b] = {
                             vertexBaseIndex: info.start,
                             vertexCount: info.count,
                             count: 0,
                             data: data,
-                            object: obejct,
+                            object: object,
                             hasChanges: false,
                         };
                     }
@@ -147,13 +146,14 @@ export class PatchInstancing<T extends IInstancingObejct> {
 
     public increment(lod: IPatchLod, x: int, z: int): ISingleLodInfoInstancing<T> {
         
-        const single = this.get(lod);
+        const single    = this.get(lod);
         const prevIndex = single.count;
-        
-        if (single.data[prevIndex * instDataSize + 0] !== x ||
-            single.data[prevIndex * instDataSize + 1] !== z) {
-            single.data[prevIndex * instDataSize + 0] = x;
-            single.data[prevIndex * instDataSize + 1] = z;
+        const index     = prevIndex * instDataSize;
+
+        if (single.data[index + 0] !== x ||
+            single.data[index + 1] !== z) {
+            single.data[index + 0] = x;
+            single.data[index + 1] = z;
             single.hasChanges = true;
         }
 

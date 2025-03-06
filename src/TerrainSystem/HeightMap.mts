@@ -1,5 +1,5 @@
 import type { float, int } from "../Shared/Types.mjs";
-import AbsHeightMap, { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
+import AbsHeightMap, { IReadonlyAbsHeightMap, THeightMapFormat } from "./AbsHeightMap.mjs";
 
 export type  HeightMapArrType = Float32Array;
 export const HeightMapArrType = Float32Array;
@@ -27,6 +27,7 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
     public get width() { return this._width; }
     public get depth() { return this._depth; }
     public get data()  { return this._data }
+    public get format(): THeightMapFormat { return 'rgba'; }
 
     public get itemSize()              { return this._itemSize; }
     public get itemHeightIndexOffset() { return this._itemHeightIndexOffset; }

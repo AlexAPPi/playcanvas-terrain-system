@@ -33,6 +33,9 @@ export interface IReadonlyAbsPatchedHeightMap extends IReadonlyAbsHeightMap {
     getChunksBuffers(type: Float32ArrayConstructor): Float32Array[];
     getChunksBuffers(type: Uint16ArrayConstructor): Uint16Array[];
     getChunksBuffers(type: Uint8ArrayConstructor): Uint8Array[];
+
+    getChunkBuffer<T extends Float32ArrayConstructor | Uint16ArrayConstructor | Uint8ArrayConstructor>(type: T, chunkX: int, chunkZ: int): any;
+    getChunksBuffers<T extends Float32ArrayConstructor | Uint16ArrayConstructor | Uint8ArrayConstructor>(type: T): any;
 }
 
 export interface IReadonlyAbsPatchedHeightMapTypped<TData extends Float32Array | Uint16Array | Uint8Array = HeightMapArrType> extends IReadonlyAbsPatchedHeightMap, IReadonlyHeightMap<TData> {
@@ -105,8 +108,8 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
 
         const localX = x % this._dataChunkSize;
         const localZ = z % this._dataChunkSize;
-        const chunkX = Math.ceil(x / this._dataChunkSize) - (localX > 0 ? 1 : 0);
-        const chunkZ = Math.ceil(z / this._dataChunkSize) - (localZ > 0 ? 1 : 0);
+        const chunkX = Math.floor(x / this._dataChunkSize);
+        const chunkZ = Math.floor(z / this._dataChunkSize);
 
         const chunkOffset = (chunkZ * this._dataNumChunksX + chunkX) * (this._dataChunkSize ** 2);
         const localIndex  = (localZ * this._dataChunkSize + localX);
@@ -149,26 +152,26 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
     }
 
     public getEntriesPatchMin(x: int, z: int) {
-        const patchX = Math.ceil(x / this._patchSize) - (x % this._patchSize > 0 ? 1 : 0);
-        const patchZ = Math.ceil(z / this._patchSize) - (z % this._patchSize > 0 ? 1 : 0);
+        const patchX = Math.floor(x / this._patchSize);
+        const patchZ = Math.floor(z / this._patchSize);
         return this.getPatchMin(patchX, patchZ);
     }
 
     public getEntriesPatchMax(x: int, z: int) {
-        const patchX = Math.ceil(x / this._patchSize) - (x % this._patchSize > 0 ? 1 : 0);
-        const patchZ = Math.ceil(z / this._patchSize) - (z % this._patchSize > 0 ? 1 : 0);
+        const patchX = Math.floor(x / this._patchSize);
+        const patchZ = Math.floor(z / this._patchSize);
         return this.getPatchMax(patchX, patchZ);
     }
 
     public getEntriesPatchMinFactor(x: int, z: int) {
-        const patchX = Math.ceil(x / this._patchSize) - (x % this._patchSize > 0 ? 1 : 0);
-        const patchZ = Math.ceil(z / this._patchSize) - (z % this._patchSize > 0 ? 1 : 0);
+        const patchX = Math.floor(x / this._patchSize);
+        const patchZ = Math.floor(z / this._patchSize);
         return this.getPatchMinFactor(patchX, patchZ);
     }
 
     public getEntriesPatchMaxFactor(x: int, z: int) {
-        const patchX = Math.ceil(x / this._patchSize) - (x % this._patchSize > 0 ? 1 : 0);
-        const patchZ = Math.ceil(z / this._patchSize) - (z % this._patchSize > 0 ? 1 : 0);
+        const patchX = Math.floor(x / this._patchSize);
+        const patchZ = Math.floor(z / this._patchSize);
         return this.getPatchMaxFactor(patchX, patchZ);
     }
 
@@ -269,8 +272,8 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
 
             for (let x = fixedMinX; x < fixedMaxX; x += this._patchSize) {
                 
-                const patchX   = Math.ceil(x / this._patchSize) - (x % this._patchSize > 0 ? 1 : 0);
-                const patchZ   = Math.ceil(z / this._patchSize) - (z % this._patchSize > 0 ? 1 : 0);
+                const patchX   = Math.floor(x / this._patchSize);
+                const patchZ   = Math.floor(z / this._patchSize);
                 const patchI   = patchZ * this._numPatchesX + patchX;
                 const minIndex = patchI * minMaxStackSize;
                 const maxIndex = minIndex + this._patchesSegmentSize;

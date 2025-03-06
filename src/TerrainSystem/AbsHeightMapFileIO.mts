@@ -1,3 +1,4 @@
+import Compressor from "../Shared/Compressor.mjs";
 import type { float, int } from "../Shared/Types.mjs";
 import type AbsHeightMap from "./AbsHeightMap.mjs";
 
@@ -15,6 +16,8 @@ export interface IImportFileHeader {
     minHeight: float,
     maxHeight: float
 }
+
+export const heightMapFileCompressedFormat: CompressionFormat = 'gzip';
 
 export abstract class AbsHeightMapFileIO {
 
@@ -49,8 +52,9 @@ export abstract class AbsHeightMapFileIO {
         // TODO:
         // header version 99
         // headerByteSize, version, width, depth, minHeight, maxHeight
-    
-        const view    = new DataView(buffer);
+
+        const nBuffer = await Compressor.decompressBuffer(buffer, heightMapFileCompressedFormat);
+        const view    = new DataView(nBuffer);
         const version = view.getUint32(1, true);
 
         if (version !== heightMapVersion) {
@@ -120,8 +124,8 @@ export abstract class AbsHeightMapFileIO {
         // headerByteSize, version, width, depth, minHeight, maxHeight
     
         const headerSize = 1 + 4 + 4 + 4 + 4 + 4;
-        const buffer = new ArrayBuffer(headerSize + factorSize * heightMap.width * heightMap.depth);
-        const view   = new DataView(buffer);
+        const buffer     = new ArrayBuffer(headerSize + factorSize * heightMap.width * heightMap.depth);
+        const view       = new DataView(buffer);
     
         view.setUint8  (0, headerSize);
         view.setUint32 (1, heightMapVersion, true);
@@ -137,8 +141,8 @@ export abstract class AbsHeightMapFileIO {
                 this.__writeHeightFactor(view, headerSize, heightMap, x, z);
             }
         }
-    
-        return buffer;
+
+        return Compressor.compressBuffer(buffer, heightMapFileCompressedFormat);
     }
 }
 

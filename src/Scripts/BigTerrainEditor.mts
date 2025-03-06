@@ -2,16 +2,17 @@ import { drawDirectionVector, drawPoint } from "../Shared/Debug.mjs";
 import { MidpointDispTerrain } from "../TerrainSystem/MidpointDispTerrain.mjs";
 import TerrainRaycastResult from "../TerrainSystem/TerrainRaycastResult.mjs";
 import HeightMap from "../TerrainSystem/HeightMap.mjs";
-import TerrainRendererPreparer from "../ScriptHelpers/TerrainRenderPreparer.mjs";
-import type { IBrushSettings } from "../ScriptHelpers/Brush.mjs";
-import ColorPainter from "../ScriptHelpers/ColorPainter.mjs";
-import TerrainPatches from "../ScriptHelpers/TerrainPatches.mjs";
-import { terrainHeightsCompressAlgoritm, terrainHeightsCompressAlgoritmDefault, terrainPatchSizeEnum, terrainPatchSizeEnumDefault, terrainSizeEnum, terrainSizeEnumDefault } from "../ScriptHelpers/Enum.mjs";
-import { terrainMaxHeightParamName, terrainMinHeightParamName, terrainSizeParamName, terrainSplatMapParamName, } from "../ScriptHelpers/TerrainPatchesShaderChunks.mjs";
+import TerrainRenderPreparer from "../TerrainHelpers/TerrainRenderPreparer.mjs";
+import type { IBrushSettings } from "../TerrainHelpers/Brush.mjs";
+import ColorPainter from "../TerrainHelpers/ColorPainter.mjs";
+import TerrainPatches from "../TerrainHelpers/TerrainPatches.mjs";
+import { terrainHeightsCompressAlgoritm, terrainHeightsCompressAlgoritmDefault, terrainPatchSizeEnum, terrainPatchSizeEnumDefault, terrainSizeEnum, terrainSizeEnumDefault } from "../TerrainHelpers/Enums.mjs";
+import { terrainMaxHeightParamName, terrainMinHeightParamName, terrainSplatMapParamName, } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
 import HeightfieldShape from "../TerrainSystem/HeightfieldShape.mjs";
 import PatchedHeightMap from "../TerrainSystem/PatchedHeightMap.mjs";
 import CompressedPatchedHeightMap, { TCompressAlgoritm } from "../TerrainSystem/CompressedPatchedHeightMap.mjs";
-import { Frustum } from "../ScriptHelpers/Frustum.mjs";
+import { Frustum } from "../TerrainHelpers/Frustum.mjs";
+import { mapTitleEnum } from "../Shared/EnumConverter.mjs";
 
 export interface ITerrainHeightMapAttribute {
     readonly file: pcx.Asset;
@@ -41,9 +42,15 @@ const tmpMat = new pc.Mat4();
 const terrainLocalVertexPos = new pc.Vec3();
 const heightMapExt = '.hm';
 
+export enum RenderMode {
+    Standard = 1,
+    InstancingAccelerator = 2,
+    CustomForwardRenderer = 3,
+}
+
 export class BigTerrainEditor extends pc.ScriptType {
 
-    declare readonly useInstancingAccelerator: boolean;
+    declare readonly renderMode: RenderMode;
     declare readonly zFar: number;
     declare readonly width: number;
     declare readonly depth: number;
@@ -67,7 +74,11 @@ export class BigTerrainEditor extends pc.ScriptType {
 
     public get shape() { return this._heightFieldShape; }
     public get terrain() { return this._terrain; }
-    public get terrainRenderer() { return this._renderer; }
+    public get terrainRenderPreparer() { return this._renderPreparer; }
+
+    private _lock = 0;
+
+    public get lock() { return this._lock; }
 
     private _localCameraPosition = new pc.Vec3();
     private _terrain: MidpointDispTerrain;
@@ -96,8 +107,16 @@ export class BigTerrainEditor extends pc.ScriptType {
     private _material: pcx.StandardMaterial;
     private _layersDiffuse: pcx.Texture | undefined;
 
-    private _renderer: TerrainRendererPreparer;
+    private _renderPreparer: TerrainRenderPreparer;
     private _frustum: Frustum;
+
+    public addLock() {
+        this._lock++;
+    }
+
+    public freeLock() {
+        this._lock--;
+    }
 
     public postInitialize(): void {
         
@@ -117,15 +136,16 @@ export class BigTerrainEditor extends pc.ScriptType {
         this._updatePainterMaterial();
         this._updateMesh();
 
-        this.on('attr:useInstancingAccelerator', () => {
-            this._renderer.patchesStore.instancing.enabled = this.useInstancingAccelerator;
-            this._renderer.patchesStore.updateMaterial(this._material);
-            this._renderer.patchesStore.updateMeshes();
+        this.on('attr:renderMode', () => {
+            this._renderPreparer.patchesStore.customForwardRenderer = this.renderMode === RenderMode.CustomForwardRenderer;
+            this._renderPreparer.patchesStore.instancing.enabled = this.renderMode === RenderMode.InstancingAccelerator;
+            this._renderPreparer.patchesStore.updateMaterial(this._material);
+            this._renderPreparer.patchesStore.updateMeshes();
         });
 
-        this.on('attr:wireframe', () => { this._renderer.wireframe = this.wireframe; });
-        this.on('attr:castShadow', () => { this._renderer.castShadow = this.castShadow; });
-        this.on('attr:receiveShadow', () => { this._renderer.receiveShadow = this.receiveShadow; });
+        this.on('attr:wireframe', () => { this._renderPreparer.wireframe = this.wireframe; });
+        this.on('attr:castShadow', () => { this._renderPreparer.castShadow = this.castShadow; });
+        this.on('attr:receiveShadow', () => { this._renderPreparer.receiveShadow = this.receiveShadow; });
 
         this.on('attr:activeLayer', () => {
             this._updatePainterMaterial();
@@ -151,8 +171,9 @@ export class BigTerrainEditor extends pc.ScriptType {
     }
 
     private _initBrush() {
+        const splatMap = this.painterSettings.splatMap.resource as pcx.Texture;
         this._brushHeightMap = new HeightMap(256, 256, 0, 100);
-        this._colorPainter = new ColorPainter(this.app, this.painterSettings.splatMap.resource);
+        this._colorPainter = new ColorPainter(this.app, splatMap);
     }
 
     private _updatePainterMaterial() {
@@ -175,8 +196,8 @@ export class BigTerrainEditor extends pc.ScriptType {
             return;
         }
 
-        const brushTexture = this.brush.textures[activeBrush].resource;
-        const brushImg = brushTexture.getSource();
+        const brushTexture = this.brush.textures[activeBrush].resource as pcx.Texture;
+        const brushImg = brushTexture.getSource() as unknown as ImageBitmap;
 
         if (!brushImg) {
             console.error('Brush image unset.');
@@ -191,7 +212,7 @@ export class BigTerrainEditor extends pc.ScriptType {
     }
 
     private _initTerrain() {
-
+        
         const tmpChunkSize = this.patchSize * 2 - 1;
         const chunkSize = Math.min(this.width, this.depth, tmpChunkSize);
         const heightMap = this.compressAlgoritm !== 'none'
@@ -203,14 +224,14 @@ export class BigTerrainEditor extends pc.ScriptType {
         this._raycastResult = new TerrainRaycastResult();
         this._frustum = new Frustum();
 
-        const patcher  = new TerrainPatches(this._terrain);
-        this._renderer = new TerrainRendererPreparer(patcher, {
+        const patcher = new TerrainPatches(this._terrain);
+        this._renderPreparer = new TerrainRenderPreparer(patcher, {
             wireframe: this.wireframe,
             castShadow: this.castShadow,
             receiveShadow: this.receiveShadow,
         });
         
-        console.log(this._terrain, this._heightFieldShape, this._renderer);
+        console.log(this._terrain, this._heightFieldShape, this._renderPreparer);
     }
 
     private _createTerrainMaterial() {
@@ -220,7 +241,6 @@ export class BigTerrainEditor extends pc.ScriptType {
 
     private _updateTerrainMaterialParameters() {
         this._material.setParameter(terrainSplatMapParamName, this._colorPainter.background);
-        this._material.setParameter(terrainSizeParamName, [this._terrain.width, this._terrain.depth]);
         this._material.setParameter(terrainMinHeightParamName, this._terrain.minHeight);
         this._material.setParameter(terrainMaxHeightParamName, this._terrain.maxHeight);
     }
@@ -253,13 +273,13 @@ export class BigTerrainEditor extends pc.ScriptType {
 
                     flag++;
                     length++;
-                    diffuses.push(diffuse.resource.getSource());
+                    diffuses.push((diffuse.resource as pcx.Texture).getSource());
                     scales.push(layer.size.x, layer.size.y);
                     offsets.push(layer.offset.x, layer.offset.y);
 
                     if (normalMap) {
                         flag++;
-                        normals.push(normalMap.resource.getSource());                    
+                        normals.push((normalMap.resource as pcx.Texture).getSource());                    
                     }
                 }
             }
@@ -280,7 +300,7 @@ export class BigTerrainEditor extends pc.ScriptType {
             addressU: pc.ADDRESS_REPEAT,
             addressV: pc.ADDRESS_REPEAT,
             addressW: pc.ADDRESS_CLAMP_TO_EDGE,
-            levels: [ diffuses ]
+            levels: [ diffuses as any ]
         });
         this._layersDiffuse.upload();
         
@@ -292,8 +312,9 @@ export class BigTerrainEditor extends pc.ScriptType {
     }
 
     private _updateMesh() {
-        this._renderer.patchesStore.instancing.enabled = this.useInstancingAccelerator;
-        this._renderer.patchesStore.init(this.app, this.entity, this._material);
+        this._renderPreparer.patchesStore.customForwardRenderer = this.renderMode === RenderMode.CustomForwardRenderer;
+        this._renderPreparer.patchesStore.instancing.enabled = this.renderMode === RenderMode.InstancingAccelerator;
+        this._renderPreparer.patchesStore.init(this.app, this.entity, this._material);
     }
     
     private _initializeMouse() {
@@ -349,8 +370,13 @@ export class BigTerrainEditor extends pc.ScriptType {
 
     private async _updateHeightMapFromAttr() {
 
-        if (this.heightMap.file &&
-            this.heightMap.file.resource) {
+        if (this.heightMap.file) {
+
+            if (!this.heightMap.file.resource) {
+                console.warn('Height map file unset.');
+                return;
+            }
+
             const data = this.heightMap.file.resource as ArrayBuffer;
             await this._terrain.loadHeightMapFromFile(data, {
                 adaptiveMinMaxHeight: true,
@@ -358,21 +384,35 @@ export class BigTerrainEditor extends pc.ScriptType {
             });
         }
         else {
-            const texture = this.heightMap.texture.resource as pcx.Texture;
-            const img = texture.getSource() as any;
+
+            const texture = this.heightMap.texture;
+
+            if (!texture) {
+                console.warn('Height map image unset.');
+                return;
+            }
+
+            const resource = texture.resource as pcx.Texture;
+            const img = resource.getSource() as any;
 
             if (!img) {
-                console.error('Height map image unset.');
+                console.warn('Height map image unset.');
                 return;
             }
 
             this._terrain.loadHeightMapFromImg(img, this.heightMap.smoothFactor, this.heightMap.smoothRadius);
 
             // TODO: clear heightmap
-            texture.destroy();
+            resource.destroy();
         }
 
-        this._renderer.patchesStore.updateAabb();
+        this._renderPreparer.patchesStore.updateAabb();
+        this._renderPreparer.patchesStore.updateHeights({
+            minX: 0,
+            minZ: 0,
+            maxX: this.width,
+            maxZ: this.depth
+        });
     }
 
     private _saveHeightMapToImg() {
@@ -443,7 +483,8 @@ export class BigTerrainEditor extends pc.ScriptType {
                     drawPoint({ center: this._raycastResult.point, radius: this._brushSize, numSegments: 10, depthTest: true, color: pc.Color.GRAY });
                     drawDirectionVector(this._raycastResult.point, this._raycastResult.normal, pc.Color.MAGENTA);
                     
-                    if (this.app.mouse?.isPressed(pc.MOUSEBUTTON_LEFT)) {
+                    if (this._lock < 1 &&
+                        this.app.mouse?.isPressed(pc.MOUSEBUTTON_LEFT)) {
 
                         if (this.painting) {
 
@@ -478,7 +519,7 @@ export class BigTerrainEditor extends pc.ScriptType {
                             }
 
                             this._terrain.recalculateMinMax(zone);
-                            this._renderer.patchesStore.updateHeights(zone);
+                            this._renderPreparer.patchesStore.updateHeights(zone);
                             hasChanges = true;
                         }
                     }
@@ -492,7 +533,7 @@ export class BigTerrainEditor extends pc.ScriptType {
             this._frustum.transform = mat;
 
             this._terrain.updateLods(this._localCameraPosition);
-            this._renderer.render(this._frustum);
+            this._renderPreparer.render(this._frustum);
         }
 
         if (this.app.keyboard?.wasPressed(pc.KEY_L)) {
@@ -508,7 +549,6 @@ export class BigTerrainEditor extends pc.ScriptType {
         }
         
         // Debug
-        //this.app.drawTexture(-0.5, -0.6, 0.5, 0.3, (this.terrainRenderer.patchesStore as any)._heightMap, undefined as any);
         //this.app.drawTexture( 0.5, -0.6, 0.5, 0.3, this.painterSettings.splatMap.resource, undefined as any);
     }
 }
@@ -518,7 +558,7 @@ export const bigTerrainEditorScriptName = "bigTerrainEditor";
 
 pc.registerScript(BigTerrainEditor, bigTerrainEditorScriptName);
 
-BigTerrainEditor.attributes.add("useInstancingAccelerator", { type: "boolean", default: false, });
+BigTerrainEditor.attributes.add("renderMode", { type: "number", enum: mapTitleEnum(RenderMode), default: RenderMode.Standard });
 BigTerrainEditor.attributes.add("castShadow", { type: "boolean", default: true, });
 BigTerrainEditor.attributes.add("receiveShadow", { type: "boolean", default: true, });
 BigTerrainEditor.attributes.add("zFar", { type: "number", default: 5000, min: 1, step: 1, precision: 0, });

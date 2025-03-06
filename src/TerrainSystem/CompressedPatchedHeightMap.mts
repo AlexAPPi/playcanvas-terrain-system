@@ -1,4 +1,5 @@
 import type { float, int } from "../Shared/Types.mjs";
+import { THeightMapFormat } from "./AbsHeightMap.mjs";
 import AbsPatchedHeightMap, { getOrThrowDataChunkSize, IReadonlyAbsPatchedHeightMapTypped } from "./AbsPatchedHeightMap.mjs";
 import { defaultHeightVertexSize } from "./HeightMap.mjs";
 
@@ -8,7 +9,7 @@ export type THeightMapArrayTypeBag<T extends TCompressAlgoritm> = T extends "x2"
 export class CompressedPatchedHeightMap<TTCompressAlgoritm extends TCompressAlgoritm>
      extends AbsPatchedHeightMap<THeightMapArrayTypeBag<TTCompressAlgoritm>>
   implements IReadonlyAbsPatchedHeightMapTypped<THeightMapArrayTypeBag<TTCompressAlgoritm>> {
-
+    
     private _compressAlgoritm: TTCompressAlgoritm;
     private _patchXBatchSize: int;
     private _maxSafeFactor: int;
@@ -91,8 +92,8 @@ export class CompressedPatchedHeightMap<TTCompressAlgoritm extends TCompressAlgo
 
         const localX = x % this.dataChunkSize;
         const localZ = z % this.dataChunkSize;
-        const chunkX = Math.ceil(x / this.dataChunkSize) - (localX > 0 ? 1 : 0);
-        const chunkZ = Math.ceil(z / this.dataChunkSize) - (localZ > 0 ? 1 : 0);
+        const chunkX = Math.floor(x / this.dataChunkSize);
+        const chunkZ = Math.floor(z / this.dataChunkSize);
 
         const chunkLevel  = (chunkZ * this.dataNumChunksX + chunkX) / this._patchXBatchSize | 0;
         const chunkOffset = chunkLevel * (this.dataChunkSize ** 2);

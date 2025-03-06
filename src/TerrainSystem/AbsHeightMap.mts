@@ -2,6 +2,16 @@ import type { float, int } from "../Shared/Types.mjs";
 import AbsHeightMapFileIO, { IHeightMapFileImportOptions } from "./AbsHeightMapFileIO.mjs";
 import type { IZone } from "./IZone.mjs";
 
+/**
+ * @variant rgb - format by uint8[3] texture
+ * @variant r23f - format by float32 texture
+ * @variant rgba - foramt by uint8[4] texture
+ * @variant rgbaX2 - format compressed by 2 patches by x coordinate
+ * @variant rgbaX4 - format compressed by 4 patches by x coordinate
+ * @see CompressedPatchedHeightMap
+ */
+export type THeightMapFormat = 'r32f' | 'rgba' | 'rgbaX2' | 'rgbaX4' | 'rgb';
+
 export interface IReadonlyAbsHeightMap {
 
     readonly width: int;

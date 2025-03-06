@@ -1,0 +1,6 @@
+node_modules
+build_tmp
+
+pcconfig.json
+pcconfig.*.json
+package-lock.json

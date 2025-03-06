@@ -134,10 +134,10 @@ export class GridBuilder {
 
         let totalIndicesForLOD = 0;
     
-        for (let l = 0 ; l < LEFT ; l++) {
-            for (let r = 0 ; r < RIGHT ; r++) {
-                for (let t = 0 ; t < TOP ; t++) {
-                    for (let b = 0 ; b < BOTTOM ; b++) {
+        for (let l = 0; l < LEFT; l++) {
+            for (let r = 0; r < RIGHT; r++) {
+                for (let t = 0; t < TOP; t++) {
+                    for (let b = 0; b < BOTTOM; b++) {
 
                         const info = this._lodInfo[lod].info[l][r][t][b];
                         info.start = index;
