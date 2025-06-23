@@ -568,7 +568,8 @@ export function getTerrainShaderChunks({
             + chunksStore.terrainHeightChunkVS
             + chunksStore.transformVS;
 
-        const diffusePS = chunksStore.gammaNormalizeChunkPS
+        const diffusePS = chunksStore.gammaNormalizeHeaderPS
+                        + chunksStore.gammaNormalizeChunkPS
                         + chunksStore.diffusePS;
 
         return {

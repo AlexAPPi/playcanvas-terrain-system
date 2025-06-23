@@ -46,8 +46,10 @@ export interface CustomMeshInstance<TMap extends Record<string, any> = Record<st
         return;
     }
 
+    // @ts-ignore
     const originalDrawInstance = pc.ForwardRenderer.prototype.drawInstance;
 
+    // @ts-ignore
     pc.ForwardRenderer.prototype.drawInstance = function(
         device: pcx.WebglGraphicsDevice,
         meshInstance: pcx.MeshInstance & CustomMeshInstance,
@@ -81,7 +83,7 @@ export interface CustomMeshInstance<TMap extends Record<string, any> = Record<st
                 }
             }
         }
-        else {    
+        else {
             
             originalDrawInstance.call(this, device, meshInstance, mesh, style, normal);
         }

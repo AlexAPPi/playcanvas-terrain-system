@@ -539,6 +539,9 @@ export function getGrassShaderChunks({
                       + chunksStore.calculateLocalVS
                       + chunksStore.transformVS;
 
+    const diffusePS = '#define GAMMA_NORMALIZE\r\n'
+                    + chunksStore.diffusePS;
+
     if (engineVersion === 'v2') {
         
         const transform2VS = definesVS + definesBladeVS + baseClearVS + transformVS;
@@ -551,7 +554,7 @@ export function getGrassShaderChunks({
             normalCoreVS: chunksStore.normalCoreVS,
 
             // Fragment
-            diffusePS: chunksStore.diffusePS,
+            diffusePS: diffusePS,
         };
     }
     
@@ -559,9 +562,6 @@ export function getGrassShaderChunks({
                    definesBladeVS +
                    baseClearVS +
                    chunksStore.baseClearSubVS;
-
-    const diffusePS = '#define GAMMA_NORMALIZE\r\n'
-                    + chunksStore.diffusePS;
 
     return {
         // Vertex

@@ -641,7 +641,8 @@ export class GrassField extends pc.ScriptType {
         this._material.setParameter(windIntensityParamName, 0);
         
         const hmFormat = getHeightMapFormat(graphicsDevice, terrain.heightMap);
-        const chunks = getGrassShaderChunks({
+        const pcVersion = `v${pc.version[0]}` as unknown as any;
+        const chunksStore = getGrassShaderChunks({
             width: terrain.width,
             depth: terrain.depth,
             heightMapChunkSize: terrain.heightMap.dataChunkSize,
@@ -653,16 +654,30 @@ export class GrassField extends pc.ScriptType {
             radius: this.radius,
             transitionLow: this.transitionLow,
             transitionHigh: this.transitionHigh,
-            engineVersion: `v${pc.version[0]}` as unknown as any,
+            engineVersion: pcVersion,
         });
 
-        const chunkNames = Object.keys(chunks);
+        const chunkNames = Object.keys(chunksStore);
 
-        for (let chunkName of chunkNames) {
-            this._material.chunks[chunkName] = chunks[chunkName];
+        if (pcVersion === 'v1') {
+
+            const chunks = this._material.chunks as unknown as Record<string, string>;
+
+            chunks.APIVersion = pc.CHUNKAPI_1_70;
+
+            for (let chunkName of chunkNames) {
+                chunks[chunkName] = chunksStore[chunkName];
+            }
+
+        }
+        else {
+            const shaderChunks = this._material.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
+            for (let chunkName of chunkNames) {
+                shaderChunks.set(chunkName, chunksStore[chunkName]);
+            }
+            this._material.shaderChunksVersion = pc.CHUNKAPI_1_70;
         }
 
-        this._material.chunks.APIVersion = pc.CHUNKAPI_1_70;
         this._material.update();
     }
 }

@@ -121,8 +121,8 @@ export default class ColorPainter {
 
             this._painterMaterial = new pc.ShaderMaterial({
                 uniqueName: 'PainterFragmentShader',
-                vertexCode: vertex,
-                fragmentCode: fragment,
+                vertexGLSL: vertex,
+                fragmentGLSL: fragment,
                 attributes: {
                     aPosition: pc.SEMANTIC_POSITION,
                     aUv0: pc.SEMANTIC_TEXCOORD0
@@ -131,8 +131,8 @@ export default class ColorPainter {
 
             this._painterInvertMaterial = new pc.ShaderMaterial({
                 uniqueName: 'PainterInvertFragmentShader',
-                vertexCode: vertex,
-                fragmentCode: fragmentInvert,
+                vertexGLSL: vertex,
+                fragmentGLSL: fragmentInvert,
                 attributes: {
                     aPosition: pc.SEMANTIC_POSITION,
                     aUv0: pc.SEMANTIC_TEXCOORD0

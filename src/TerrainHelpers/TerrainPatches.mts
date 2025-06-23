@@ -419,6 +419,7 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
                            this.instancing instanceof TerrainPathcesInstancing ? 'simple' :
                            false;
 
+        const pcVersion = `v${pc.version[0]}` as unknown as any;
         const chunksStore = getTerrainShaderChunks({
             width: this.terrain.width,
             depth: this.terrain.depth,
@@ -426,16 +427,30 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
             heightMapChunkSize: this.terrain.heightMap.dataChunkSize, 
             instancing: instancing,
             heightMapFormat: format,
-            engineVersion: `v${pc.version[0]}` as unknown as any,
+            engineVersion: pcVersion,
         });
         
         const chunkNames = Object.keys(chunksStore);
 
-        for (let chunkName of chunkNames) {
-            material.chunks[chunkName] = chunksStore[chunkName];
+        if (pcVersion === 'v1') {
+
+            const chunks = material.chunks as unknown as Record<string, string>;
+
+            chunks.APIVersion = pc.CHUNKAPI_1_70;
+
+            for (let chunkName of chunkNames) {
+                chunks[chunkName] = chunksStore[chunkName];
+            }
+
         }
-        
-        material.chunks.APIVersion = pc.CHUNKAPI_1_70;
+        else {
+            const shaderChunks = material.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
+            for (let chunkName of chunkNames) {
+                shaderChunks.set(chunkName, chunksStore[chunkName]);
+            }
+            material.shaderChunksVersion = pc.CHUNKAPI_1_70;
+        }
+
         material.update();
     }
 

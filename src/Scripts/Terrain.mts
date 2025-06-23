@@ -224,10 +224,12 @@ export class Terrain extends pc.ScriptType {
         // TODO: Move to terrain collider
         // TODO: Ammo js integration
 
-        const buffer: any = ((window as any).Ammo) ? getBuffer(this.width, this.depth, this.patchSize, chunkSize, this.compressAlgoritm) : undefined;
+        let buffer: any = undefined;
 
-        if (((window as any).Ammo)) {
-            
+        if (typeof Ammo !== 'undefined') {
+
+            buffer = getBuffer(this.width, this.depth, this.patchSize, chunkSize, this.compressAlgoritm);
+
             const ht = this.compressAlgoritm === 'none' ? 0 :
                        this.compressAlgoritm === 'x2'   ? 1 :
                                                           2 ;
