@@ -10,8 +10,6 @@ export function distanceX1Z1X2Z2(x1: float, z1: float, x2: float, z2: float) {
     return Math.sqrt(ls);
 }
 
-export const Vector2Math = {
+export default {
     distanceX1Z1X2Z2,
-}
-
-export default Vector2Math;
+};

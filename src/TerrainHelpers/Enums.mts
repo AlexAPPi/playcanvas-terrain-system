@@ -10,7 +10,6 @@ export const terrainSizeEnum = mapEnum({
     '4096':  4097,
     '8192':  8193,
     '16384': 16385,
-    '32768': 32769,
 });
 
 export const terrainPatchSizeEnumDefault = 33;
@@ -22,6 +21,7 @@ export const terrainPatchSizeEnum = mapEnum({
     '256':   257,
     '512':   513,
     '1024':  1025,
+    '2048':  2049,
 });
 
 export const terrainHeightsCompressAlgoritmDefault = 'none';

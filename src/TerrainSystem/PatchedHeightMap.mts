@@ -10,16 +10,16 @@ export class PatchedHeightMap extends AbsPatchedHeightMap<Float32Array> implemen
 
         const numChunksX   = ((width - 1) / (chunkSize - 1)) | 0;
         const numChunksZ   = ((depth - 1) / (chunkSize - 1)) | 0;
-        const chunkArrSize = chunkSize * chunkSize;
+        const chunkArrSize = chunkSize ** 2;
         const chunkCount   = numChunksX * numChunksZ;
     
         return new Float32Array(chunkArrSize * chunkCount);
     }
 
-    constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, buffer?: Float32Array) {
+    constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, maxHeight: float, buffer?: Float32Array) {
         const validDataChunkSize = getOrThrowDataChunkSize(patchSize, dataChunkSize);
         const tmpBuffer = buffer ?? PatchedHeightMap.createBuffer(width, depth, validDataChunkSize);
-        super(width, depth, patchSize, dataChunkSize, minHeight, maxHeight, tmpBuffer, 1, 0);
+        super(width, depth, patchSize, dataChunkSize, maxHeight, tmpBuffer, 1, 0);
     }
 }
 

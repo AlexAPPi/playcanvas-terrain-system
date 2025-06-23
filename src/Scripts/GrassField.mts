@@ -1,11 +1,10 @@
-import { BoundingBox } from "playcanvas";
 import { GrassFieldTexture } from "../GrassFieldHelpers/GrassFieldTexture.mjs";
-import { drawPosParamName, getGrassShaderChunks, offset2XZParamName, offsetAttrName, offsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName } from "../GrassFieldHelpers/GrassShaderChunk.mjs";
+import { drawPosParamName, getGrassShaderChunks, lod2OffsetXZParamName, offsetAttrName, lod1OffsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName, terrainScaleParamName } from "../GrassFieldHelpers/GrassShaderChunk.mjs";
 import { drawBox } from "../Shared/Debug.mjs";
 import Random from "../Shared/Random.mjs";
 import { getHeightMapFormat } from "../TerrainHelpers/TerrainPatches.mjs";
-import { terrainHeightMapParamName, terrainMaxHeightParamName, terrainMinHeightParamName } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
-import BigTerrainEditor, { bigTerrainEditorScriptName } from "./BigTerrainEditor.mjs";
+import { terrainHeightMapParamName, terrainMaxHeightParamName } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
+import Terrain from "./Terrain.mjs";
 
 export interface IBufferStore {
 
@@ -22,34 +21,16 @@ export interface IBufferStore {
 }
 
 export const quad1Matrix = [
-    2, 2,
-    1, 2,
-    0, 2,
-    0, 1,
-    0, 0,
-    1, 0,
-    2, 0,
-    2, 1,
-    1, 1
+    2, 2,  1, 2,  0, 2,
+    0, 1,  0, 0,  1, 0,
+    2, 0,  2, 1,  1, 1
 ];
 
 export const quad2Matrix = [
-    4, 4,
-    3, 4,
-    2, 4,
-    1, 4,
-    0, 4,
-    0, 3,
-    0, 2,
-    0, 1,
-    0, 0,
-    1, 0,
-    2, 0,
-    3, 0,
-    4, 0,
-    4, 1,
-    4, 2,
-    4, 3
+    4, 4,  3, 4,  2, 4,  1, 4,
+    0, 4,  0, 3,  0, 2,  0, 1,
+    0, 0,  1, 0,  2, 0,  3, 0,
+    4, 0,  4, 1,  4, 2,  4, 3
 ];
 
 export const quadMatrixIndexes = [
@@ -60,6 +41,7 @@ export const quadMatrixIndexes = [
 
 const lod1QuadCount = 8;
 const lod2QuadCount = 16;
+const tmpMat = new pc.Mat4();
 
 export interface IGrassTextureAttribute {
     readonly name: string,
@@ -102,9 +84,8 @@ export class GrassField extends pc.ScriptType {
     private _material: pcx.StandardMaterial;
 
     private _dataTexture: GrassFieldTexture;
-    private _terrainEntity: pcx.Entity;
     private _cameraEntity: pcx.Entity;
-    private _terrainEditor: BigTerrainEditor;
+    private _terrain: Terrain;
     private _time: number = 0;
     private _lastDrawPos: pcx.Vec3 = new pc.Vec3();
     private _lod1MinMaxStore: Array<[pcx.Vec3, pcx.Vec3, boolean]> = [];
@@ -113,33 +94,17 @@ export class GrassField extends pc.ScriptType {
     private _aabb: pcx.BoundingBox;
 
     private _offsetLod1Arr: number[] = [
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
+        0, 0,  0, 0,
+        0, 0,  0, 0,
+        0, 0,  0, 0,
+        0, 0,  0, 0,
     ];
 
     private _offsetLod2Arr: number[] = [
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
-        0, 0,
+        0, 0,  0, 0,  0, 0,  0, 0,
+        0, 0,  0, 0,  0, 0,  0, 0,
+        0, 0,  0, 0,  0, 0,  0, 0,
+        0, 0,  0, 0,  0, 0,  0, 0,
     ];
 
     public get checkRadius() { return this.radius / 2; }
@@ -175,31 +140,30 @@ export class GrassField extends pc.ScriptType {
         this._updateGrassMesh(this.app.graphicsDevice, this.patchRadius);
 
         if (this.painting) {
-            this._terrainEditor.addLock();
+            this._terrain.addLock();
         }
     }
 
     public postInitialize(): void {
 
-        const terrainEntity    = this.entity.root.findByName('Terrain') as pcx.Entity;
-        const bigTerrainScript = terrainEntity.script?.get(bigTerrainEditorScriptName) as BigTerrainEditor;
+        const terrainEntity = this.entity.root.findByName('Terrain') as pcx.Entity;
+        const terrainScript = terrainEntity.script?.get(Terrain) as Terrain;
 
-        this._terrainEditor = bigTerrainScript;
-        this._terrainEntity = terrainEntity;
-        this._cameraEntity  = bigTerrainScript.cameraEntity!;
-        this._dataTexture   = new GrassFieldTexture(this.app.graphicsDevice, this._terrainEditor.width, this._terrainEditor.depth);
+        this._terrain      = terrainScript;
+        this._cameraEntity = terrainScript.cameraEntity!;
+        this._dataTexture  = new GrassFieldTexture(this.app.graphicsDevice, this._terrain.width, this._terrain.depth);
 
         this._initBladesAndEditMode();
 
         this.on('enable', () => this._initBladesAndEditMode());
         this.on('disable', () => {
             this.destroy();
-            this._terrainEditor.freeLock();
+            this._terrain.freeLock();
         });
 
         this.on('attr:painting', () => {
-            if (this.painting) { this._terrainEditor.addLock(); }
-            else               { this._terrainEditor.freeLock(); }
+            if (this.painting) { this._terrain.addLock(); }
+            else               { this._terrain.freeLock(); }
         });
         
         this.on('attr:wireframe', () => {
@@ -238,7 +202,11 @@ export class GrassField extends pc.ScriptType {
         const tex   = existsTexs ? this.textures[0].diffuse.resource : null;
 
         if (!this.freezeDrawPos) {
-            this._lastDrawPos.copy(cameraPos);
+
+            const mat = this.entity.getWorldTransform();
+
+            tmpMat.invert(mat);
+            tmpMat.transformPoint(cameraPos, this._lastDrawPos);
         }
 
         this._time += dt;
@@ -253,19 +221,13 @@ export class GrassField extends pc.ScriptType {
     }
 
     public updateAabb() {
-
-        const terrain = this._terrainEditor.terrain;
-        const halfWidth = terrain.width / 2;
-        const halfDepth = terrain.depth / 2;
-
-        this._aabb ??= new pc.BoundingBox();
-        this._aabb.setMinMax(
-            new pc.Vec3(-halfWidth, terrain.minHeight, -halfDepth),
-            new pc.Vec3(+halfWidth, terrain.maxHeight, +halfDepth)
-        );
+        
+        const patchesAabb = this._terrain.renderPreparer.patchesStore.aabb;
 
         if (this._meshInst) {
-            this._meshInst.setCustomAabb(this._aabb);
+            this._meshInst.mesh.aabb = patchesAabb;
+            this._meshInst.aabb = patchesAabb;
+            this._meshInst.setCustomAabb(patchesAabb);
         }
     }
 
@@ -280,9 +242,10 @@ export class GrassField extends pc.ScriptType {
         camera: pcx.Camera,
         freeze: boolean,
     ) {
-        const checkRadius = this.checkRadius;
-        const minHeight   = this._terrainEditor.terrain.minHeight;
-        const maxHeight   = this._terrainEditor.terrain.maxHeight;
+        const scale        = this.entity.getScale();
+        const terrainScale = this._terrain.entity.getScale();
+        const checkRadius  = this.checkRadius * Math.max(scale.x, scale.z);
+        const maxHeight    = this._terrain.object.maxHeight * terrainScale.y;
         const frustumPlanes = camera.frustum.planes;
         const checkIsVisible = (min: pcx.Vec3, max: pcx.Vec3) => {
 
@@ -307,19 +270,18 @@ export class GrassField extends pc.ScriptType {
         for (let i = 0; i < count; i++) {
 
             if (!minMaxStore[i]) minMaxStore[i] = [new pc.Vec3(), new pc.Vec3(), false];
-
             if (!freeze) {
 
                 const quadMatrixX  = quadMatrix[i * 2 + 0];
                 const quadMatrixZ  = quadMatrix[i * 2 + 1];
                 const localCenterX = this.radius * (quadMatrixX - quadOffset);
                 const localCenterZ = this.radius * (quadMatrixZ - quadOffset);
-                const worldCenterX = cameraPos.x + localCenterX;
-                const worldCenterZ = cameraPos.z + localCenterZ;
+                const worldCenterX = cameraPos.x + localCenterX * scale.x;
+                const worldCenterZ = cameraPos.z + localCenterZ * scale.z;
 
                 minMaxStore[i][0].set(
                     worldCenterX - checkRadius,
-                    minHeight,
+                    0,
                     worldCenterZ - checkRadius
                 );
 
@@ -380,8 +342,8 @@ export class GrassField extends pc.ScriptType {
                         + this.lod1BladeSegs * 12 * visibleLod1Count
                         + this.lod2BladeSegs * 12 * visibleLod2Count;
         
-        meshInst.setParameter(`${offsetXZParamName}[0]`, this._offsetLod1Arr);
-        meshInst.setParameter(`${offset2XZParamName}[0]`, this._offsetLod2Arr);
+        meshInst.setParameter(`${lod1OffsetXZParamName}[0]`, this._offsetLod1Arr);
+        meshInst.setParameter(`${lod2OffsetXZParamName}[0]`, this._offsetLod2Arr);
 
         // always true for lod 0
         meshInst.visible = this.autoRender || freeze;
@@ -647,11 +609,21 @@ export class GrassField extends pc.ScriptType {
         this._material?.destroy();
         this._material = new pc.StandardMaterial();
         this._material.name = "GrassFieldMaterial";
-        this._material.blendType = pc.BLEND_NONE;
 
-        const terrain   = this._terrainEditor.terrain;
-        const patches   = this._terrainEditor.terrainRenderPreparer.patchesStore;
+        /*
+        this._material.depthTest = false;
+        this._material.depthWrite = true;
+        this._material.blendType = pc.BLEND_NONE;
+        this._material.alphaTest = 0;
+        this._material.alphaWrite = false;
+        this._material.alphaFade = false;
+        this._material.alphaToCoverage = false;
+        */
+
+        const terrain   = this._terrain.object;
+        const patches   = this._terrain.renderPreparer.patchesStore;
         const heightMap = patches.heightMapTexture;
+        const terrainScale = this._terrain.entity.getScale();
 
         this._material.setAttribute(vindexAttrName, pc.SEMANTIC_POSITION);
         this._material.setAttribute(offsetAttrName, pc.SEMANTIC_ATTR10);
@@ -659,10 +631,10 @@ export class GrassField extends pc.ScriptType {
 
         this._material.setParameter('uDataMap', this._dataTexture.texture);
         this._material.setParameter(terrainHeightMapParamName, heightMap);
-        this._material.setParameter(terrainMinHeightParamName, terrain.minHeight);
+        this._material.setParameter(terrainScaleParamName, [terrainScale.x, terrainScale.y, terrainScale.z]);
         this._material.setParameter(terrainMaxHeightParamName, terrain.maxHeight);
-        this._material.setParameter(`${offsetXZParamName}[0]`, this._offsetLod1Arr);
-        this._material.setParameter(`${offset2XZParamName}[0]`, this._offsetLod2Arr);
+        this._material.setParameter(`${lod1OffsetXZParamName}[0]`, this._offsetLod1Arr);
+        this._material.setParameter(`${lod2OffsetXZParamName}[0]`, this._offsetLod2Arr);
 
         this._material.setParameter(drawPosParamName, [0, 0, 0]);
         this._material.setParameter(timeParamName, this._time);
@@ -681,6 +653,7 @@ export class GrassField extends pc.ScriptType {
             radius: this.radius,
             transitionLow: this.transitionLow,
             transitionHigh: this.transitionHigh,
+            engineVersion: `v${pc.version[0]}` as unknown as any,
         });
 
         const chunkNames = Object.keys(chunks);

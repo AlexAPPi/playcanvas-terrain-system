@@ -48,7 +48,7 @@ export interface CustomMeshInstance<TMap extends Record<string, any> = Record<st
 
     const originalDrawInstance = pc.ForwardRenderer.prototype.drawInstance;
 
-    pc.ForwardRenderer.prototype.drawInstance = function (
+    pc.ForwardRenderer.prototype.drawInstance = function(
         device: pcx.WebglGraphicsDevice,
         meshInstance: pcx.MeshInstance & CustomMeshInstance,
         mesh: pcx.Mesh & CustomMesh,
@@ -56,27 +56,14 @@ export interface CustomMeshInstance<TMap extends Record<string, any> = Record<st
         normal?: boolean
     ) {
 
-        if (mesh.primitiveChunks) {
+        if (mesh.primitiveChunks && device.isWebGL2) {
 
-            const modelMatrix = (meshInstance.node as any).worldTransform;
-            this.modelMatrixId.setValue(modelMatrix.data);
-
+            this.modelMatrixId.setValue((meshInstance.node as any).worldTransform.data);
             if (normal) {
-                const normalMatrix = meshInstance.node.normalMatrix;
-                this.normalMatrixId.setValue(normalMatrix.data);
+                this.normalMatrixId.setValue(meshInstance.node.normalMatrix.data);
             }
 
-            let vb0;
-            let vb1;
-            let indexBuffer;
-            
-            if (device.isWebGPU) {
-                vb0 = device.vertexBuffers[0];
-                vb1 = device.vertexBuffers[1];
-                indexBuffer = device.indexBuffer;
-            }
-
-            let keepBuffers = false;
+            let kb = false;
 
             for (const primitive of mesh.primitiveChunks[style]) {
 
@@ -89,27 +76,13 @@ export interface CustomMeshInstance<TMap extends Record<string, any> = Record<st
                         }
                     }
 
-                    // Keep buffer
-                    if (device.isWebGPU) {
-
-                        device.draw(primitive, 1, true);
-
-                        device.indexBuffer = indexBuffer!;
-                        device.vertexBuffers.push(vb0, vb1);
-                    }
-                    else {
-                        device.draw(primitive, 0, keepBuffers);
-                        keepBuffers = true;
-                    }
+                    device.draw(primitive, 0, kb);
+                    kb = true;
                 }
             }
-
-            if (device.isWebGPU) {
-                device.indexBuffer = null!;
-                device.vertexBuffers.length = 0;
-            }
         }
-        else {
+        else {    
+            
             originalDrawInstance.call(this, device, meshInstance, mesh, style, normal);
         }
     }

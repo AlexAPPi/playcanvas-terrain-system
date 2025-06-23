@@ -9,6 +9,7 @@ export class FlyCamera extends pc.ScriptType {
 
     private ex: number;
     private ey: number;
+    private translateLoc: pcx.Vec3;
     private moved: boolean;
     private middleDown: boolean;
     private rightDown: boolean;
@@ -21,6 +22,7 @@ export class FlyCamera extends pc.ScriptType {
 
         this.ex = (eulers.z - eulers.x);
         this.ey = (eulers.z - eulers.y);
+        this.translateLoc = pc.Vec3.ZERO.clone();
         this.moved = false;
         this.rightDown = false;
         this.middleDown = false;
@@ -41,18 +43,18 @@ export class FlyCamera extends pc.ScriptType {
         this.ex = pc.math.clamp(this.ex, -90, 90);
     }
 
-    public translate(x: number | pcx.Vec3, y?: number, z?: number) {
-        this.entity.translateLocal(x, y, z);
+    public translate(x: number, y: number, z: number) {
+        this.translateLoc.x += x;
+        this.translateLoc.y += y;
+        this.translateLoc.z += z;
     }
 
     public update(dt: number) {
 
-        // Update the camera's orientation
-        this.entity.setLocalEulerAngles(this.ex, this.ey, 0);
-    
         const app = this.app;
-    
+
         let speed = this.speed;
+
         if (app.keyboard?.isPressed(pc.KEY_SPACE)) {
             speed = this.slowSpeed;
         }
@@ -89,13 +91,20 @@ export class FlyCamera extends pc.ScriptType {
         } else if (app.keyboard?.isPressed(pc.KEY_RIGHT) || app.keyboard?.isPressed(pc.KEY_D)) {
             this.translate(speed * dt, 0, 0);
         }
+        
+        // Update the camera's TRS
+        this.entity.setLocalEulerAngles(this.ex, this.ey, 0);
+        this.entity.translateLocal(this.translateLoc);
+        this.translateLoc.set(0, 0, 0);
+
+        // Update frustum by actual matrix
+        this.app.renderer.updateCameraFrustum(this.entity.camera?.camera);
     }
 
     private onMouseMove(event: pcx.MouseEvent) {
 
-        if (!this.mode) {
-            if (!pc.Mouse.isPointerLocked())
-                return;
+        if (!this.mode && !pc.Mouse.isPointerLocked()) {
+            return;
         }
 
         if (!this.rightDown &&
@@ -160,7 +169,6 @@ export default FlyCamera;
 export const flyCameraScriptName = 'flyCamera';
 
 pc.registerScript(FlyCamera, flyCameraScriptName);
-
 
 FlyCamera.attributes.add('mobileControls', {
     type: 'entity',

@@ -1,19 +1,19 @@
 import Compressor from "../Shared/Compressor.mjs";
 import type { float, int } from "../Shared/Types.mjs";
 import type AbsHeightMap from "./AbsHeightMap.mjs";
+import { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
 
 export const heightMapVersion = 99;
 export const factorSize = 3;
 
 export interface IHeightMapFileImportOptions {
     adaptiveWidthAndDepth?: boolean,
-    adaptiveMinMaxHeight?: boolean,
+    adaptiveMaxHeight?: boolean,
 }
 
 export interface IImportFileHeader {
     width: int,
     depth: int,
-    minHeight: float,
     maxHeight: float
 }
 
@@ -29,18 +29,19 @@ export abstract class AbsHeightMapFileIO {
         const b = view.getUint8(headerSize + index * factorSize + 2);
     
         const scaled = (r << 16) | (g << 8) | b;
-        const factor = scaled / 16777215;
+        const factor = scaled / 0xffffff;
         
         return factor;
     }
 
-    private __writeHeightFactor(view: DataView, headerSize: int, heightMap: AbsHeightMap, x: int, z: int) {
+    private __writeHeightFactor(view: DataView, headerSize: int, heightMap: IReadonlyAbsHeightMap, x: int, z: int) {
+
         const index  = z * heightMap.width + x;
         const factor = heightMap.getFactor(x, z);
-        const scaled = Math.floor(factor * 16777215);
-        const r = (scaled >> 16) & 0xFF;
-        const g = (scaled >> 8) & 0xFF;
-        const b = (scaled & 0xFF);
+        const scaled = Math.floor(factor * 0xffffff);
+        const r = (scaled >> 16) & 0xff;
+        const g = (scaled >> 8) & 0xff;
+        const b = (scaled & 0xff);
 
         view.setUint8(headerSize + index * factorSize + 0, r);
         view.setUint8(headerSize + index * factorSize + 1, g);
@@ -51,7 +52,7 @@ export abstract class AbsHeightMapFileIO {
 
         // TODO:
         // header version 99
-        // headerByteSize, version, width, depth, minHeight, maxHeight
+        // headerByteSize, version, width, depth, maxHeight
 
         const nBuffer = await Compressor.decompressBuffer(buffer, heightMapFileCompressedFormat);
         const view    = new DataView(nBuffer);
@@ -65,14 +66,9 @@ export abstract class AbsHeightMapFileIO {
         const headerSize = view.getUint8(0);
         const width      = view.getUint32(5, true);
         const depth      = view.getUint32(9, true);
-        const minHeight  = view.getFloat32(13, true);
-        const maxHeight  = view.getFloat32(17, true);
+        const maxHeight  = view.getFloat32(13, true);
     
-        const delta = options?.adaptiveMinMaxHeight
-            ? heightMap.maxHeight - heightMap.minHeight
-            : maxHeight - minHeight;
-        
-        const resultMinHeight = options?.adaptiveMinMaxHeight ? heightMap.minHeight : minHeight;
+        const finalMaxHeight = options?.adaptiveMaxHeight ? heightMap.maxHeight : maxHeight;
         
         if (heightMap.width !== width ||
             heightMap.depth !== depth &&
@@ -89,7 +85,7 @@ export abstract class AbsHeightMapFileIO {
 
                     // TODO: smooth for heightMap more import data
                     const factor = this.__readHeightFactor(view, headerSize, width, x | 0, z | 0);
-                    const height = resultMinHeight + factor * delta;
+                    const height = factor * finalMaxHeight;
 
                     heightMap.set(x / factorX, z / factorZ, height);
                 }
@@ -102,7 +98,7 @@ export abstract class AbsHeightMapFileIO {
                 for (let x = 0; (x < width) && (x < heightMap.width); x++) {
 
                     const factor = this.__readHeightFactor(view, headerSize, width, x, z);
-                    const height = resultMinHeight + factor * delta;
+                    const height = factor * finalMaxHeight;
                     
                     heightMap.set(x, z, height);
                 }
@@ -112,7 +108,6 @@ export abstract class AbsHeightMapFileIO {
         return {
             width,
             depth,
-            minHeight,
             maxHeight
         }
     }
@@ -121,9 +116,9 @@ export abstract class AbsHeightMapFileIO {
     
         // TODO:
         // header version 99
-        // headerByteSize, version, width, depth, minHeight, maxHeight
+        // headerByteSize, version, width, depth, maxHeight
     
-        const headerSize = 1 + 4 + 4 + 4 + 4 + 4;
+        const headerSize = 1 + 4 + 4 + 4 + 4;
         const buffer     = new ArrayBuffer(headerSize + factorSize * heightMap.width * heightMap.depth);
         const view       = new DataView(buffer);
     
@@ -131,8 +126,7 @@ export abstract class AbsHeightMapFileIO {
         view.setUint32 (1, heightMapVersion, true);
         view.setUint32 (5, heightMap.width, true);
         view.setUint32 (9, heightMap.depth, true);
-        view.setFloat32(13, heightMap.minHeight, true);
-        view.setFloat32(17, heightMap.maxHeight, true);
+        view.setFloat32(13, heightMap.maxHeight, true);
     
         for (let z = 0; z < heightMap.depth; z++) {
 

@@ -1,6 +1,6 @@
 import { IBrushSettings } from "./Brush.mjs";
 import { fragmentInvertShader, fragmentShader, vertexShader } from "./ColorPainterShaders.mjs";
-import { setPrecision } from "./Shared.mjs";
+import { setPrecision } from "../Shared/Utils.mjs";
 
 export const painterCameraFar = 10;
 export const painterLayerName = 'TerrainEditor';
@@ -117,6 +117,31 @@ export default class ColorPainter {
         const fragment = setPrecision(this._app.graphicsDevice, fragmentShader);
         const fragmentInvert = setPrecision(this._app.graphicsDevice, fragmentInvertShader);
 
+        if (pc.ShaderMaterial) {
+
+            this._painterMaterial = new pc.ShaderMaterial({
+                uniqueName: 'PainterFragmentShader',
+                vertexCode: vertex,
+                fragmentCode: fragment,
+                attributes: {
+                    aPosition: pc.SEMANTIC_POSITION,
+                    aUv0: pc.SEMANTIC_TEXCOORD0
+                }
+            });
+
+            this._painterInvertMaterial = new pc.ShaderMaterial({
+                uniqueName: 'PainterInvertFragmentShader',
+                vertexCode: vertex,
+                fragmentCode: fragmentInvert,
+                attributes: {
+                    aPosition: pc.SEMANTIC_POSITION,
+                    aUv0: pc.SEMANTIC_TEXCOORD0
+                }
+            });
+
+            return;
+        }
+
         this._painterShader = pc.createShaderFromCode(this._app.graphicsDevice, vertex, fragment, 'PainterFragmentShader', {
             aPosition: pc.SEMANTIC_POSITION,
             aUv0: pc.SEMANTIC_TEXCOORD0
@@ -130,17 +155,22 @@ export default class ColorPainter {
 
     private _initMaterials() {
 
-        this._painterMaterial = new pc.Material();
+        if (!pc.ShaderMaterial) {
+
+            this._painterMaterial = new pc.Material();
+            this._painterInvertMaterial = new pc.Material();
+            
+            /* @ts-ignore */
+            this._painterMaterial.shader = this._painterShader;
+            /* @ts-ignore */
+            this._painterInvertMaterial.shader = this._painterInvertShader;
+        }
+
         this._painterMaterial.name = 'BrushPainterMaterial';
-        // @ts-ignore
-        this._painterMaterial.shader = this._painterShader;
         this._painterMaterial.blendType = pc.BLEND_ADDITIVE;
         this._painterMaterial.update();
 
-        this._painterInvertMaterial = new pc.Material();
         this._painterInvertMaterial.name = 'BrushPainterInvertMaterial';
-        // @ts-ignore
-        this._painterInvertMaterial.shader = this._painterInvertShader;
         this._painterInvertMaterial.blendType = pc.BLEND_SUBTRACTIVE;
         this._painterInvertMaterial.update();
     }

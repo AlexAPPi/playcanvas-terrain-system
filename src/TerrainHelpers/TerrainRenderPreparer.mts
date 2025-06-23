@@ -57,7 +57,7 @@ export default class TerrainRenderPreparer implements IGridPatchRenderPreparer {
             this._updateMesh(meshInstance);
         }
 
-        this.patchesStore.instancing.forEach(item => {
+        this.patchesStore.instancing?.forEach(item => {
             this._updateMesh(item.object);
         });
     }
@@ -69,13 +69,13 @@ export default class TerrainRenderPreparer implements IGridPatchRenderPreparer {
             meshInstance.receiveShadow = this._receiveShadow;
         }
     }
-
+    
     public preparePatch(visible: boolean, baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lodInfo: Readonly<IPatchLod>) {
         
-        const terrain = this.patchesStore.terrain;
+        const terrain    = this.patchesStore.terrain;
         const patchIndex = patchZ * terrain.numPatchesX + patchX;
-        const buffer = this.patchesStore.bufferArray[patchIndex];
-        const currHash = baseIndex / count;
+        const buffer     = this.patchesStore.bufferArray[patchIndex];
+        const currHash   = baseIndex / count;
 
         buffer.hash              = currHash;
         buffer.visible           = visible;
@@ -100,17 +100,14 @@ export default class TerrainRenderPreparer implements IGridPatchRenderPreparer {
             primitive.type    = this._wireframe ? pc.PRIMITIVE_LINES : pc.PRIMITIVE_TRIANGLES;
 
             primitive.attributes[patchLodCoreParamName] = lodInfo.core;
-
-            return;
         }
-
-        if (this.patchesStore.instancing.enabled) {
+        else if (this.patchesStore.instancing) {
 
             if (visible) {
 
-                const inst = this.patchesStore.instancing.increment(lodInfo, minX, minZ);
+                const inst = this.patchesStore.instancing.increment(lodInfo, buffer);
                 
-                if (inst.object) {
+                if (inst.count === 1 && inst.object) {
 
                     const meshInstance = inst.object;
                     const primitive = meshInstance.mesh.primitive[0];
@@ -123,30 +120,30 @@ export default class TerrainRenderPreparer implements IGridPatchRenderPreparer {
                     primitive.type = this._wireframe ? pc.PRIMITIVE_LINES : pc.PRIMITIVE_TRIANGLES;
                 }
             }
+        }
+        else {
+
+            const meshInstance = this.patchesStore.getOrCreatePatchMesh(patchIndex);
+            const mesh = meshInstance.mesh;
+            const primitive = mesh.primitive[0];
+
+            if (meshInstance) {
+                meshInstance.visible = visible;
+                meshInstance.visibleThisFrame = visible;
+
+                meshInstance.castShadow    = this._castShadow;
+                meshInstance.receiveShadow = this._receiveShadow;
+            }
+
+            primitive.base  = baseIndex;
+            primitive.count = count;
+            primitive.type  = this._wireframe ? pc.PRIMITIVE_LINES : pc.PRIMITIVE_TRIANGLES;
             
-            return;
+            meshInstance.setParameter(patchLodCoreParamName, lodInfo.core);
         }
-
-        const meshInstance = this.patchesStore.getOrCreatePatchMesh(patchIndex);
-        const mesh = meshInstance.mesh;
-        const primitive = mesh.primitive[0];
-
-        if (meshInstance) {
-            meshInstance.visible = visible;
-            meshInstance.visibleThisFrame = visible;
-
-            meshInstance.castShadow    = this._castShadow;
-            meshInstance.receiveShadow = this._receiveShadow;
-        }
-
-        primitive.base  = baseIndex;
-        primitive.count = count;
-        primitive.type  = this._wireframe ? pc.PRIMITIVE_LINES : pc.PRIMITIVE_TRIANGLES;
-        
-        meshInstance.setParameter(patchLodCoreParamName, lodInfo.core);
     }
 
-    public render(frustum?: IFrustum) {
+    public update(frustum?: IFrustum) {
 
         // TODO: In theory we can control the quality of the model for shadows
         // TODO: Add support for Occlusion culling
@@ -169,16 +166,12 @@ export default class TerrainRenderPreparer implements IGridPatchRenderPreparer {
             }
         }
         
-        if (this.patchesStore.instancing.enabled) {
-            this.patchesStore.instancing.begin(false, false);
-        }
+        this.patchesStore.instancing?.begin(false, false);
 
-        this.patchesStore.startRender();
+        this.patchesStore.startUpdate();
         this.patchesStore.terrain.eachPatches(this, frustum);
-        this.patchesStore.endRender(this._hasUpdatedHeights);
+        this.patchesStore.endUpdate(this._hasUpdatedHeights);
 
-        if (this.patchesStore.instancing.enabled) {
-            this.patchesStore.instancing.end();
-        }
+        this.patchesStore.instancing?.end();
     }
 }

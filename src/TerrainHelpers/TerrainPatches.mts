@@ -1,15 +1,18 @@
-import { IPatchLod } from "../TerrainSystem/LodManager.mjs";
+import { IPatchLod, IPatchLodBase } from "../TerrainSystem/LodManager.mjs";
 import { coordsVertexSize, IReadonlyCoordsBuffer } from "../TerrainSystem/CoordsBuffer.mjs";
 import TerrainPatchesBasic, { TerrainPatchBufferBasic } from "./TerrainPatchesBasic.mjs";
 import { patchCoordOffsetParamName, terrainHeightMapParamName, getTerrainShaderChunks, vertexCoordAttrName, patchLodCoreParamName, patchInstCoordOffsetParamName, getTextureType } from "./TerrainPatchesShaderChunks.mjs";
 import { int } from "../Shared/Types.mjs";
 import { ISingleLodInfo } from "../TerrainSystem/LodInfo.mjs";
-import { instDataSize, TInstCoordsOffsetArrType } from "../TerrainSystem/PatchInstancing.mjs";
 import { IZone } from "../TerrainSystem/IZone.mjs";
 import { IReadonlyAbsHeightMap, THeightMapFormat } from "../TerrainSystem/AbsHeightMap.mjs";
 import CompressedPatchedHeightMap from "../TerrainSystem/CompressedPatchedHeightMap.mjs";
 import BaseTerrain from "../TerrainSystem/Terrain.mjs";
 import { CustomMesh, CustomMeshInstance, IPrimitive } from "../EngineExtensions/Renderer.mjs";
+import { checkSupportR32FTexture } from "../Shared/Utils.mjs";
+import { ITerrainPatchesInstancing } from "./ITerrainPatchesInstancing.mjs";
+import { TerrainPathcesCombineInstancing } from "./TerrainPatchesCombineInstancing.mjs";
+import { TerrainPathcesInstancing } from "./TerrainPatchesInstancing.mjs";
 
 export interface IPatchPrimitive {
     [patchCoordOffsetParamName]: [number, number] | Float32Array,
@@ -17,9 +20,8 @@ export interface IPatchPrimitive {
 }
 
 export function getHeightMapFormat(graphicsDevice: pcx.GraphicsDevice, heightMap: IReadonlyAbsHeightMap) {
-
-    // TODO: check support float32 texture
-    let hmFormat: THeightMapFormat = 'rgba';
+    
+    let hmFormat: THeightMapFormat = checkSupportR32FTexture(graphicsDevice) ? 'r32f' : 'rgba';
 
     if (heightMap instanceof CompressedPatchedHeightMap) {
         hmFormat = heightMap.compressAlgoritm === 'x4' ? 'rgbaX4' : 'rgbaX2';
@@ -30,11 +32,19 @@ export function getHeightMapFormat(graphicsDevice: pcx.GraphicsDevice, heightMap
 
 export function getHeightMapChunkBufferType(graphicsDevice: pcx.GraphicsDevice, format: number) {
 
+    if (format === pc.PIXELFORMAT_R32F) {
+        return Float32Array;
+    }
+
     if (format === pc.PIXELFORMAT_RG16U) {
         return Uint16Array;
     }
 
-    return Uint8Array;
+    if (format === pc.PIXELFORMAT_RGBA8U) {
+        return Uint8Array;
+    }
+
+    throw new Error('Unsupported format');
 }
 
 export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBufferBasic, IPatchPrimitive> {
@@ -46,16 +56,12 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
 
     public get heightMapTexture() { return this._heightMap; }
 
-    private _updatePatchHeightsOnGPU(patchX: int, patchZ: int) {
+    private _updatePatchHeightsOnGPU(dataChunkX: int, dataChunkZ: int) {
 
         // TODO: a batch update may be required.
-
         // TODO: transform in heightmap class
-        const dataChunkSize = this.terrain.heightMap.dataChunkSize;
-        const factor        = this.terrain.heightMap.dataChunkSizeFactor;
-        const dataChunkX    = patchX * factor | 0;
-        const dataChunkZ    = patchZ * factor | 0;
 
+        const dataChunkSize = this.terrain.heightMap.dataChunkSize;
         const level  = this.terrain.heightMap.getChunkIndex(dataChunkX, dataChunkZ);
         const buffer = this.terrain.heightMap.getChunkBuffer(this._heightMapLevelsType, dataChunkX, dataChunkZ);
 
@@ -84,7 +90,7 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
                 buffer,
                 {
                     offset: 0,
-                    bytesPerRow: 4 * dataChunkSize, // always 4 for rgba format
+                    bytesPerRow: dataChunkSize * 4, // always 4 for rgba format
                     rowsPerImage: dataChunkSize
                 },
                 {
@@ -96,15 +102,22 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
     }
 
     private _updateHeightMap(zone: IZone) {
-        this.forEach(zone, (patchIndex, x, z) => {
-            this._updatePatchHeightsOnGPU(x, z);
-        });
+        
+        this._forEach(
+            zone,
+            this.terrain.heightMap.dataChunkSize,
+            this.terrain.heightMap.dataNumChunksX,
+            this.terrain.heightMap.dataNumChunksZ,
+            (patchIndex, x, z) => {
+                this._updatePatchHeightsOnGPU(x, z);
+            }
+        );
     }
 
     protected _createPatchBuffer(patchIndex: int, baseIndex: int, baseVertex: int, count: int, patchX: int, patchZ: int, minX: int, minZ: int, size: int, lod: IPatchLod) {
 
-        const patchBuf = new TerrainPatchBufferBasic(patchIndex, minX, minZ, size);
-
+        const patchBuf = new TerrainPatchBufferBasic(patchIndex, patchX, patchZ, minX, minZ, size);
+        
         patchBuf.lod = lod;
         patchBuf.indicesBaseIndex = baseIndex;
         patchBuf.indicesBaseVertex = baseVertex;
@@ -116,9 +129,7 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
     }
     
     private _buildVertexFormat(graphicsDevice: pcx.GraphicsDevice, vertexBuffer: IReadonlyCoordsBuffer) {
-        
-        // We can use uint8 for patches smaller than 255, but we only use 2 bytes,
-        // for optimal performance need 4 bytes for the buffer.
+
         const coordsFormat = (vertexBuffer.patchVertexBufferTyped instanceof Uint8Array) ? pc.TYPE_UINT8 : pc.TYPE_UINT16;
         const vertexDesc = [{
             semantic: pc.SEMANTIC_POSITION,
@@ -131,21 +142,24 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         return new pc.VertexFormat(graphicsDevice, vertexDesc, vertexBuffer.patchVertexBufferLength);
     }
 
-    protected _buildInstancingVertexFormat(graphicsDevice: pcx.GraphicsDevice) {
-        // We can use uint8, but we only use 2 bytes,
-        // for optimal performance need 4 bytes for the buffer.
+    protected _buildInstancingVertexFormat(graphicsDevice: pcx.GraphicsDevice, instancer: ITerrainPatchesInstancing<any>) {
+
+        const type = instancer.bufferType === Uint16Array ? pc.TYPE_UINT16 :
+                     instancer.bufferType === Uint8Array ?  pc.TYPE_UINT8 :
+                                                            pc.TYPE_FLOAT32;
+
         return new pc.VertexFormat(graphicsDevice, [{
             semantic: pc.SEMANTIC_ATTR10,
-            components: coordsVertexSize,
-            type: pc.TYPE_UINT16,
+            components: instancer.itemBufferSize,
+            type: type,
             normalize: false,
             asInt: true
         }]);
     }
 
-    protected _buildInstancingVertexBuffer(graphicsDevice: pcx.GraphicsDevice, data: TInstCoordsOffsetArrType) {
-        return new pc.VertexBuffer(graphicsDevice, this._buildInstancingVertexFormat(graphicsDevice), data.length / instDataSize, {
-            usage: pc.BUFFER_STREAM,
+    protected _buildInstancingVertexBuffer(graphicsDevice: pcx.GraphicsDevice, instancer: ITerrainPatchesInstancing<any>, data: Uint16Array | Uint8Array) {
+        return new pc.VertexBuffer(graphicsDevice, this._buildInstancingVertexFormat(graphicsDevice, instancer), data.length / instancer.itemBufferSize, {
+            usage: pc.BUFFER_GPUDYNAMIC,
             data: data,
             storage: false,
         });
@@ -211,11 +225,11 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         return patchMeshInstance;
     }
 
-    protected override _createInstancingMesh(app: pcx.AppBase, entity: pcx.Entity, material: pcx.Material, lodInfo: IPatchLod, primitiveInfo: ISingleLodInfo, data: TInstCoordsOffsetArrType): pcx.MeshInstance {
+    protected override _createInstancingMesh(app: pcx.AppBase, entity: pcx.Entity, material: pcx.Material, lodInfo: IPatchLodBase, primitiveInfo: ISingleLodInfo, instancer: ITerrainPatchesInstancing<any>, data: Uint16Array | Uint8Array): pcx.MeshInstance {
         
         const patchMesh = new pc.Mesh(app.graphicsDevice);
         const primitive = patchMesh.primitive[0];
-        const instancingBuf = this._buildInstancingVertexBuffer(app.graphicsDevice, data);
+        const instancingBuf = this._buildInstancingVertexBuffer(app.graphicsDevice, instancer, data);
 
         patchMesh.aabb = this.aabb;
         patchMesh.indexBuffer[0] = this._sharedIndexBuffer;
@@ -351,8 +365,8 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
             height: dataChunkSize,
             format: format,
             mipmaps: false,
-            minFilter: pc.FILTER_LINEAR,
-            magFilter: pc.FILTER_LINEAR,
+            minFilter: pc.FILTER_NEAREST,
+            magFilter: pc.FILTER_NEAREST,
             addressU: pc.ADDRESS_CLAMP_TO_EDGE,
             addressV: pc.ADDRESS_CLAMP_TO_EDGE,
             addressW: pc.ADDRESS_CLAMP_TO_EDGE,
@@ -366,8 +380,7 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
 
         this._updateIndexBuffer(this._app.graphicsDevice);
 
-        if (this.customForwardRenderer ||
-            this.instancing.enabled) {
+        if (this.customForwardRenderer || this.instancing) {
             this.updateMeshes();
         }
         else {
@@ -381,21 +394,39 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         }
     }
 
+    public static createMaterial(): pcx.StandardMaterial {
+
+        const material = new pc.StandardMaterial();
+              material.name = 'TerrainMaterial';
+
+        material.setAttribute(patchInstCoordOffsetParamName, pc.SEMANTIC_ATTR10);
+        material.setAttribute(vertexCoordAttrName, pc.SEMANTIC_POSITION);
+
+        return material;
+    }
+
     private _bindDependenciesToMaterial(material: pcx.StandardMaterial) {
 
         material.setAttribute(patchInstCoordOffsetParamName, pc.SEMANTIC_ATTR10);
         material.setAttribute(vertexCoordAttrName, pc.SEMANTIC_POSITION);
+
         material.setParameter(patchLodCoreParamName, 0);
         material.setParameter(patchCoordOffsetParamName, [0, 0]);
         material.setParameter(terrainHeightMapParamName, this._heightMap);
 
         const format = getHeightMapFormat(this._app.graphicsDevice, this.terrain.heightMap);
+        const instancing = this.instancing instanceof TerrainPathcesCombineInstancing ? 'combine' :
+                           this.instancing instanceof TerrainPathcesInstancing ? 'simple' :
+                           false;
+
         const chunksStore = getTerrainShaderChunks({
             width: this.terrain.width,
             depth: this.terrain.depth,
+            patchSize: this.terrain.patchSize,
             heightMapChunkSize: this.terrain.heightMap.dataChunkSize, 
-            instancing: this.instancing.enabled,
+            instancing: instancing,
             heightMapFormat: format,
+            engineVersion: `v${pc.version[0]}` as unknown as any,
         });
         
         const chunkNames = Object.keys(chunksStore);
@@ -408,9 +439,27 @@ export default class TerrainPatches extends TerrainPatchesBasic<TerrainPatchBuff
         material.update();
     }
 
-    public override updateMaterial(material: pcx.StandardMaterial): void {
+    public override setInstancing(value: ITerrainPatchesInstancing<any> | undefined, updateMeshes: boolean = true) {
+        
+        if (value === this.instancing) {
+            return;
+        }
+
+        super.setInstancing(value, false);
+
+        if (this._material) {
+
+            this._bindDependenciesToMaterial(this._material);
+
+            if (updateMeshes) {
+                this.updateMeshes();
+            }
+        }
+    }
+
+    public override setMaterial(material: pcx.StandardMaterial): void {
         this._bindDependenciesToMaterial(material);
-        super.updateMaterial(material);
+        super.setMaterial(material);
     }
 
     public override updateHeights(zone: IZone) {

@@ -42,8 +42,8 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
         this.lodManager.printLodMap();
     }
 
-    public updateLods(localCameraPos: RefObject<IVector3>, center: boolean = true) {
-        this.lodManager.update(localCameraPos, this.heightMap, center);
+    public updateLods(localCameraPos: RefObject<IVector3>, useYPos: boolean = true, center: boolean = true) {
+        this.lodManager.update(localCameraPos, this.heightMap, useYPos, center);
     }
 
     public eachPatches(renderPreparer: IGridPatchRenderPreparer, frustum?: IFrustum) {
@@ -58,15 +58,10 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
 
                 const minX = patchX * patchSizeNorm;
 
-                const visible = !!frustum && this._isPatchInsideViewFrustumBySphere(patchX, patchZ, frustum);
+                const visible = !!frustum && this.isPatchInsideViewFrustumBySphere(patchX, patchZ, frustum);
 
                 const plod = this.lodManager.getPatchLod(patchX, patchZ);
-                const C = plod.core;
-                const L = plod.left;
-                const R = plod.right;
-                const T = plod.top;
-                const B = plod.bottom;
-                const info = this.lodInfo[C].info[L][R][T][B];
+                const info = this.lodInfo[plod.core].info[plod.left][plod.right][plod.top][plod.bottom];
 
                 const baseIndex  = info.start;
                 const baseVertex = minZ * this.width + minX;
@@ -76,18 +71,18 @@ export class GeomipGridRenderPreparer extends GeomipGridBuilder {
         }
     }
 
-    private _isPatchInsideViewFrustumBySphere(patchBaseX: int, patchBaseZ: int, frustum: IFrustum): boolean {
+    public isPatchInsideViewFrustumBySphere(patchBaseX: int, patchBaseZ: int, frustum: IFrustum): boolean {
 
         const patchMinHeight = this.heightMap.getPatchMin(patchBaseX, patchBaseZ);
         const patchMaxHeight = this.heightMap.getPatchMax(patchBaseX, patchBaseZ);
+        
+        const patchRadiusBySize   = this.patchSize / 2;
+        const patchRediusByHeight = (patchMaxHeight - patchMinHeight) / 2;
 
-        const patchRadius       = this.patchSize / 2;
-        const patchHeightRadius = patchMaxHeight - patchMinHeight;
-
-        const patchCenterX   = (patchBaseX * this.patchSize) + patchRadius;
+        const patchCenterX   = (patchBaseX * this.patchSize) + patchRadiusBySize;
         const patchCenterY   = (patchMaxHeight + patchMinHeight) / 2;
-        const patchCenterZ   = (patchBaseZ * this.patchSize) + patchRadius;
-        const radius         = (patchRadius > patchHeightRadius ? patchRadius : patchHeightRadius) * Math.SQRT2;
+        const patchCenterZ   = (patchBaseZ * this.patchSize) + patchRadiusBySize;
+        const radius         = (patchRadiusBySize > patchRediusByHeight ? patchRadiusBySize : patchRediusByHeight) * Math.SQRT2;
 
         // center the patches relative to the entity center
         const patchCenteredX = (-this.width / 2) + patchCenterX;

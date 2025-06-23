@@ -1,10 +1,9 @@
-import type { float, RefObject, unsignedint as unsigned_int } from "../Shared/Types.mjs";
+import type { float, RefObject } from "../Shared/Types.mjs";
 import { IReadonlyCoordsBuffer, CoordsBuffer } from "./CoordsBuffer.mjs";
 import AbsPatchedHeightMap, { type IReadonlyAbsPatchedHeightMap } from "./AbsPatchedHeightMap.mjs";
 import GridBuilder, { IGridPatched } from "./GridBuilder.mjs";
 
 export interface IGromipGridWithHeight extends IGridPatched {
-    readonly minHeight: float;
     readonly maxHeight: float;
 }
 

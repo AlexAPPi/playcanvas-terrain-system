@@ -222,3 +222,43 @@
     console.log("Recovered float:", recoveredFloat); // должно вывести 0.15625
 
 })();
+
+
+(() => {
+
+    const zone = {minX: 2059, maxX: 2062, minZ: 1768, maxZ: 1771};
+    const width = 4097;
+    const depth = 4097;
+    const patchSize = 129;
+    const numPatchesX = 32;
+    const numPatchesZ = 32;
+
+    if (zone.maxX < 0) return;
+    if (zone.maxZ < 0) return;
+
+    const minX = Math.max(zone.minX, 0);
+    const minZ = Math.max(zone.minZ, 0);
+    const maxX = Math.min(zone.maxX, width);
+    const maxZ = Math.min(zone.maxZ, depth);
+    
+    const minPatchX = minX / patchSize | 0;
+    const minPatchZ = minZ / patchSize | 0;
+    const maxPatchX = maxX / patchSize | 0;
+    const maxPatchZ = maxZ / patchSize | 0;
+
+    const normalizeMinX = Math.max(minPatchX, 0);
+    const normalizeMinZ = Math.max(minPatchZ, 0);
+    const normalizeMaxX = Math.min(maxPatchX + 1, numPatchesX);
+    const normalizeMaxZ = Math.min(maxPatchZ + 1, numPatchesZ);
+
+    for (let z = normalizeMinZ; z < normalizeMaxZ; z++) {
+
+        for (let x = normalizeMinX; x < normalizeMaxX; x++) {
+
+            const patchIndex = z * numPatchesX + x;
+
+            console.log(patchIndex, x, z);
+        }
+    }
+
+})();

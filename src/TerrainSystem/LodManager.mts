@@ -2,10 +2,10 @@ import type { RefObject, IVector3, float, int } from "../Shared/Types.mjs";
 import { ObjStore2D } from "../Shared/Store2D.mjs";
 import { getText } from "../Shared/Utils.mjs";
 import Vector3Math from "../Shared/Vector3Math.mjs";
-import type { IReadonlyAbsPatchedHeightMap } from "./AbsPatchedHeightMap.mjs";
+import Vector2Math from "../Shared/Vector2Math.mjs";
+import { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
 
-export interface IPatchLod {
-    distance: float;
+export interface IPatchLodBase {
     core: int;
     left: int;
     right: int;
@@ -13,8 +13,18 @@ export interface IPatchLod {
     bottom: int;
 }
 
-export const getLodHash = (lod: IPatchLod): int => {
-    return 17 * lod.core * 31 * lod.top * 31 * lod.left * 31 * lod.bottom * 31 * lod.right;
+export interface IPatchLod extends IPatchLodBase {
+
+    /** Distance to patch center xz and y pos from heightmap altitude by camera xz to */
+    distance: float;
+}
+
+export function getLodId(c: int, l: int, r: int, t: int, b: int) {
+            
+    const lodCore = c + 1;
+    const lodBinaryValue = (l << 3) | (r << 2) | (t << 1) | b;
+    
+    return lodCore * 0x1111 - lodBinaryValue;
 }
 
 export const defaultPatchLod: Readonly<IPatchLod> = {
@@ -84,27 +94,25 @@ export class LodManager {
         if (numSegmentsLog2Ceil !== numSegmentsLog2Floor) {
             throw new Error("The number of vertices in the patch minus one must be a power of two\n");
         }
-    
-        const patchSizeLog2 = numSegmentsLog2Floor;
 
-        this._maxLOD = patchSizeLog2 - 1;
+        this._maxLOD = numSegmentsLog2Floor - 1;
     }
 
     private _calcLodRegions() {
-
+        
         // TODO: We can use the ring system to determine the LOD.
         // TODO: Based on the heights we can calculate the optimal lods
 
         let sum = 0;
     
-        for (let i = 0; i < this._maxLOD + 1; i++) {
+        for (let i = 0; i <= this._maxLOD; i++) {
             sum += i + 1;
         }
 
         let x = this._zFar / sum;
         let temp = 0;
     
-        for (let i = 0; i < this._maxLOD + 1; i++) {
+        for (let i = 0; i <= this._maxLOD; i++) {
             const curRange = (x * (i + 1)) | 0;
             this._regions[i] = temp + curRange;
             temp += curRange;
@@ -171,19 +179,30 @@ export class LodManager {
         return this._map.getByIndex(index);
     }
 
-    public update(cameraPos: RefObject<IVector3>, heightMap: IReadonlyAbsPatchedHeightMap, center: boolean = true): boolean {
-        const a = this.updateLodMapPass1(cameraPos, heightMap, center);
+    public update(cameraPos: RefObject<IVector3>, heightMap: IReadonlyAbsHeightMap, useYPos: boolean = true, center: boolean = true): boolean {
+        const a = this.updateLodMapPass1(cameraPos, heightMap, useYPos, center);
         const b = this.updateLodMapPass2();
         return a || b;
     }
 
-    protected updateLodMapPass1(cameraPos: RefObject<IVector3>, heightMap: IReadonlyAbsPatchedHeightMap, center: boolean) {
+    protected updateLodMapPass1(cameraPos: RefObject<IVector3>, heightMap: IReadonlyAbsHeightMap, useYPos: boolean, center: boolean) {
 
         let hasChange = false;
+        let distanceToCamera;
 
         const centerStep = this._patchSize / 2 | 0;
         const halfWidth  = heightMap.width / 2;
-        const halfDepth  = heightMap.depth / 2; 
+        const halfDepth  = heightMap.depth / 2;
+
+        let cameraPosTerrainAltitude = 0;
+
+        if (useYPos) {
+
+            const normalizeCameraX = Math.min(Math.max(center ? cameraPos.x + halfWidth : cameraPos.x, 0), heightMap.width - 1);
+            const normalizeCameraZ = Math.min(Math.max(center ? cameraPos.z + halfDepth : cameraPos.z, 0), heightMap.depth - 1);
+
+            cameraPosTerrainAltitude = heightMap.get(normalizeCameraX | 0, normalizeCameraZ | 0);
+        }
 
         for (let lodMapZ = 0; lodMapZ < this._numPatchesZ; lodMapZ++) {
 
@@ -192,21 +211,25 @@ export class LodManager {
                 const x = lodMapX * (this._patchSize - 1) + centerStep;
                 const z = lodMapZ * (this._patchSize - 1) + centerStep;
 
-                const patchCenterX     = center ? -halfWidth + x : x;
-                const patchCenterY     = (heightMap.getPatchMax(lodMapX, lodMapZ) + heightMap.getPatchMin(lodMapX, lodMapZ)) / 2;
-                const patchCenterZ     = center ? -halfDepth + z : z;
-                const distanceToCamera = Vector3Math.distanceV3XYZ(cameraPos, patchCenterX, patchCenterY, patchCenterZ);
-                //const distanceToCamera = Vector2Math.distanceX1Z1X2Z2(cameraPos.x, cameraPos.z, patchCenterX, patchCenterZ);
+                const patchCenterX = center ? -halfWidth + x : x;
+                const patchCenterZ = center ? -halfDepth + z : z;
+
+                if (useYPos) {
+                    distanceToCamera = Vector3Math.distanceV3XYZ(cameraPos, patchCenterX, cameraPosTerrainAltitude, patchCenterZ);
+                }
+                else {
+                    distanceToCamera = Vector2Math.distanceX1Z1X2Z2(cameraPos.x, cameraPos.z, patchCenterX, patchCenterZ);
+                }
 
                 const coreLod   = this.distanceToLod(distanceToCamera);
                 const pPatchLOD = this._map.get(lodMapX, lodMapZ);
 
+                pPatchLOD.distance = distanceToCamera;
+
                 if (pPatchLOD.core !== coreLod) {
+                    pPatchLOD.core = coreLod;
                     hasChange = true;
                 }
-
-                pPatchLOD.distance = distanceToCamera;
-                pPatchLOD.core = coreLod;
             }
         }
 
@@ -236,9 +259,8 @@ export class LodManager {
                     const prev = item.left;
                     const next = this._map.get(indexLeft, lodMapZ).core > coreLod ? 1 : 0;
 
-                    item.left = next;
-
                     if (prev !== next) {
+                        item.left = next;
                         hasChange = true;
                     }
                 }
@@ -250,9 +272,8 @@ export class LodManager {
                     const prev = item.right;
                     const next = this._map.get(indexRight, lodMapZ).core > coreLod ? 1 : 0;
 
-                    item.right = next;
-
                     if (prev !== next) {
+                        item.right = next;
                         hasChange = true;
                     }
                 }
@@ -264,9 +285,8 @@ export class LodManager {
                     const prev = item.bottom;
                     const next = this._map.get(lodMapX, indexBottom).core > coreLod ? 1 : 0;
 
-                    item.bottom = next;
-
                     if (prev !== next) {
+                        item.bottom = next;
                         hasChange = true;
                     }
                 }
@@ -278,9 +298,8 @@ export class LodManager {
                     const prev = item.top;
                     const next = this._map.get(lodMapX, indexTop).core > coreLod ? 1 : 0;
 
-                    item.top = next;
-
                     if (prev !== next) {
+                        item.top = next;
                         hasChange = true;
                     }
                 }

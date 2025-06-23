@@ -16,7 +16,6 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
 
     private _width: int = 0;
     private _depth: int = 0;
-    private _minHeight: float = 0;
     private _maxHeight: float = 0;
     private _data: TData;
     
@@ -26,29 +25,27 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
     public get size()  { return this._width * this._depth; }
     public get width() { return this._width; }
     public get depth() { return this._depth; }
-    public get data()  { return this._data }
+    public get data()  { return this._data; }
     public get format(): THeightMapFormat { return 'rgba'; }
 
     public get itemSize()              { return this._itemSize; }
     public get itemHeightIndexOffset() { return this._itemHeightIndexOffset; }
-
-    public get minHeight()  { return this._minHeight; }
+    
     public get maxHeight()  { return this._maxHeight; }
 
-    public constructor(width: int, depth: int, minHeight: float, maxHeight: float);
-    public constructor(width: int, depth: int, minHeight: float, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int);
-    public constructor(width: int, depth: int, minHeight: float, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
+    public constructor(width: int, depth: int, maxHeight: float);
+    public constructor(width: int, depth: int, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int);
+    public constructor(width: int, depth: int, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
         super();
-        this._init(width, depth, minHeight, maxHeight, buffer!, itemSize, itemHeightIndexOffset);
+        this._init(width, depth, maxHeight, buffer!, itemSize, itemHeightIndexOffset);
     }
 
-    protected _init(width: int, depth: int, minHeight: float, maxHeight: float): void;
-    protected _init(width: int, depth: int, minHeight: float, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int): void;
-    protected _init(width: int, depth: int, minHeight: float, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0): void {
+    protected _init(width: int, depth: int, maxHeight: float): void;
+    protected _init(width: int, depth: int, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int): void;
+    protected _init(width: int, depth: int, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0): void {
 
         this._width = width;
         this._depth = depth;
-        this._maxHeight = minHeight;
         this._maxHeight = maxHeight;
 
         if (buffer) {
@@ -81,14 +78,14 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
         return store[index];
     }
     
-    protected _decodeHeight(store: Record<number, number>, index: int, min: float, max: float) {
-        return this._decodeHeightFactor(store, index) * (max - min) + min;
+    protected _decodeHeight(store: Record<number, number>, index: int, max: float) {
+        return this._decodeHeightFactor(store, index) * max;
     }
 
-    protected _encodeAndSetHeightFactor(store: TData, index: int, realHeight: float, min: float, max: float) {
+    protected _encodeAndSetHeightFactor(store: TData, index: int, realHeight: float, max: float) {
 
-        const normalize = Math.max(Math.min(realHeight, max), min);
-        const factor    = (normalize - min) / (max - min);
+        const normalize = Math.max(Math.min(realHeight, max), 0);
+        const factor    = normalize / max;
     
                this._encodeHeightFactor(store, index, factor);
         return this._decodeHeightFactor(store, index);
@@ -105,40 +102,34 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
 
     public override get(x: int, z: int) {
         const index = this.getIndex(x, z);
-        return this._decodeHeight(this._data, index, this._minHeight, this._maxHeight);
+        return this._decodeHeight(this._data, index, this._maxHeight);
     }
 
     public override set(x: int, z: int, value: float) {
         const index = this.getIndex(x, z);
-        return this._encodeAndSetHeightFactor(this._data, index, value, this._minHeight, this._maxHeight);
+        return this._encodeAndSetHeightFactor(this._data, index, value, this._maxHeight);
     }
 
-    public setMinMaxHeight(minHeight: float, maxHeight: float) {
-
-        if (this._minHeight > this._maxHeight) {
-            return;
-        }
-
-        this._minHeight = minHeight;
+    public setMaxHeight(maxHeight: float) {
         this._maxHeight = maxHeight;
     }
 
     public override append(x: int, z: int, value: float) {
 
         const index     = this.getIndex(x, z);
-        const oldValue  = this._decodeHeight(this._data, index, this._minHeight, this._maxHeight);
+        const oldValue  = this._decodeHeight(this._data, index, this._maxHeight);
         const canValue  = oldValue + value;
 
-        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._minHeight, this._maxHeight);
+        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._maxHeight);
     }
 
     public override multiply(x: int, z: int, value: float, heightIfZero: float = 0) {
 
         const index     = this.getIndex(x, z);
-        const oldValue  = this._decodeHeight(this._data, index, this._minHeight, this._maxHeight) || heightIfZero;
+        const oldValue  = this._decodeHeight(this._data, index, this._maxHeight) || heightIfZero;
         const canValue  = oldValue * value;
 
-        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._minHeight, this._maxHeight);
+        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._maxHeight);
     }
 }
 

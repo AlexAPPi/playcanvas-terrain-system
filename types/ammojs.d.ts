@@ -13,7 +13,18 @@ type btInternalTickCallback = (world: btDynamicsWorld, timeStep: number) => void
 
 type ExtractTypeOf<T> = (new(...args: any[]) => T);
 
-export function compare(a: any, b: any): boolean; 
+export const HEAP8: Int8Array;
+export const HEAP16: Int16Array;
+export const HEAP32: Int32Array;
+export const HEAPF32: Float32Array;
+export const HEAPF64: Float64Array;
+export const HEAPU8: Uint8Array;
+export const HEAPU16: Uint16Array;
+export const HEAPU32: Uint32Array;
+
+export function _free(ptr: number): void;
+export function _malloc(byteSize: number): number;
+export function compare(a: any, b: any): boolean;
 export function getPointer<T>(obj: T): number | T;
 export function wrapPointer<T>(pointer: number | T, type: ExtractTypeOf<T>): T;
 export function castObject<T>(obj: any, type: ExtractTypeOf<T>): T;
@@ -23,6 +34,20 @@ export function addFunction(cb: btContactProcessedCallback, v: typeof CONTACT_PR
 export function addFunction(cb: btInternalTickCallback, v: typeof INTERNAL_TICK_CALLBACK_SIGNATURE): number;
 
 export function destroy(obj: any): void;
+
+export enum PHY_AlexTerrainCompressType {
+	PHY_ATCT_NONE,
+	PHY_ATCT_X2,
+	PHY_ATCT_X4
+}
+
+export class btAlexHeightfieldTerrainShape extends btConcaveShape {
+    constructor(heightMap: btAlexTerrainPatchedHeightMap, flipQuadEdges: boolean);
+}
+
+export class btAlexTerrainPatchedHeightMap {
+    constructor(width: number, depth: number, patchSize: number, chunkSize: number, minHeight: number, maxHeight: number, compressType: PHY_AlexTerrainCompressType, heightfieldData: unknown);
+}
 
 export class btIDebugDraw {
     drawLine(from: btVector3, to: btVector3, color: btVector3): void;

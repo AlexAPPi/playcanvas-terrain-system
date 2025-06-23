@@ -17,7 +17,6 @@ export interface IReadonlyAbsHeightMap {
     readonly width: int;
     readonly depth: int;
 
-    readonly minHeight: float;
     readonly maxHeight: float;
 
     get(x: int, z: int): float;
@@ -33,8 +32,6 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
 
     public abstract width: int;
     public abstract depth: int;
-
-    public abstract minHeight: float;
     public abstract maxHeight: float;
 
     public abstract get(x: int, z: int): float;
@@ -98,14 +95,13 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
     public toBuffer(buffer: Uint8Array | Uint8ClampedArray): void {
 
         const width  = this.width;
-        const delta  = this.maxHeight - this.minHeight;
 
         for (let z = 0; z < this.depth; z++) {
 
             for (let x = 0; x < this.width; x++) {
             
                 const h   = this.get(x, z);
-                const v   = (h - this.minHeight) / delta * 255;
+                const v   = h / this.maxHeight * 255;
                 const pos = (x + z * width) * 4;
 
                 buffer[pos]     = v;
@@ -172,7 +168,6 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
         const imageData   = context.getImageData(0, 0, bufferWidth, bufferHeight);
         const imageBuffer = imageData.data;
 
-        const demMinMax   = this.maxHeight - this.minHeight;
         const maxSegmentX = this.width - 1;
         const maxSegmentZ = this.depth - 1;
         const factorX     = bufferWidth  / maxSegmentX;
@@ -195,7 +190,7 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
                 const a = imageBuffer[pos + 3];
 
                 const coeff  = (r + g + b) / 3 / a;
-                const height = this.minHeight + demMinMax * coeff;
+                const height = coeff * this.maxHeight;
 
                 this.set(x, z, height);
             }
@@ -258,21 +253,14 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
         this.smoothZone(this, np, radius);
     }
 
-    public normalize(minHeight: float, maxHeight: float) {
-
-        if (minHeight > maxHeight) {
-            return;
-        }
-
-        const minMaxDelta = this.maxHeight - this.minHeight;
-        const minMaxRange = maxHeight - minHeight;
-
+    public normalize(maxHeight: float) {
+        
         for (let z = 0; z < this.depth; z++) {
 
             for (let x = 0; x < this.width; x++) {
 
                 const currentHeight   = this.get(x, z);
-                const normalizeHeight = ((currentHeight - minHeight) / minMaxDelta) * minMaxRange + maxHeight;
+                const normalizeHeight = (currentHeight / this.maxHeight) * maxHeight;
 
                 this.set(x, z, normalizeHeight);
             }

@@ -1,4 +1,4 @@
-import { getSamplerType, getTerrainHeightFactorVS, heightMapFactorsChunks, terrainHeightMapParamName, terrainMaxHeightParamName, terrainMinHeightParamName } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
+import { getSamplerType, getTerrainHeightFactorVS, heightMapFactorsChunks, heightMapSamplerBugFix, terrainMaxHeightParamName } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
 import { THeightMapFormat } from "../TerrainSystem/AbsHeightMap.mjs";
 
 export const vindexAttrName = "vertex_position";
@@ -6,8 +6,9 @@ export const offsetAttrName = "vertex_offset";
 export const shapeAttrName  = "vertex_shape";
 
 export const timeParamName          = "uTime";
-export const offsetXZParamName      = "uOffsetXZ";
-export const offset2XZParamName     = "uOffset2XZ";
+export const terrainScaleParamName  = "uTerrainScale";
+export const lod1OffsetXZParamName  = "uLod1OffsetXZ";
+export const lod2OffsetXZParamName  = "uLod2OffsetXZ";
 export const drawPosParamName       = "uDrawPosition";
 export const windIntensityParamName = "uWindIntensity";
 
@@ -17,18 +18,16 @@ export const transformDeclVS = ``;
 
 export const definesVS = /** @type glsl */
 `
-    precision highp float;
-
-    #define PI 3.141592654
-
-    #define HM_NUM_CHUNKS_X (%%HM_NUM_CHUNKS_X%%)
-    #define HM_CHUNK_SIZE   (%%HM_CHUNK_SIZE%%)
-    #define HM_CHUNK_SIZE_F (float(HM_CHUNK_SIZE))
-    #define TR_SIZE         (ivec2(%%TR_SIZE_X%%, %%TR_SIZE_Z%%))
-    #define TR_SIZE_F       (vec2(%%TR_SIZE_X_F%%, %%TR_SIZE_Z_F%%))
-    #define TR_SIZE_BOUND_F (TR_SIZE_F - 2.0)      
-    #define TR_SIZE_H_F     (TR_SIZE_F / 2.0)
-    #define TR_SIZE_H_N_F   (-TR_SIZE_H_F)
+    #define HM_NUM_CHUNKS_X    (%%HM_NUM_CHUNKS_X%%)
+    #define HM_NUM_CHUNKS_X_U  (uint(HM_NUM_CHUNKS_X))
+    #define HM_CHUNK_SIZE      (%%HM_CHUNK_SIZE%%)
+    #define HM_CHUNK_SIZE_F    (float(HM_CHUNK_SIZE))
+    #define HM_CHUNK_SIZE_U    (uint(HM_CHUNK_SIZE))
+    #define TR_SIZE            (ivec2(%%TR_SIZE_X%%, %%TR_SIZE_Z%%))
+    #define TR_SIZE_F          (vec2(%%TR_SIZE_X_F%%, %%TR_SIZE_Z_F%%))
+    #define TR_SIZE_BOUND_F    (TR_SIZE_F - 2.0)      
+    #define TR_SIZE_H_F        (TR_SIZE_F / 2.0)
+    #define TR_SIZE_H_N_F      (-TR_SIZE_H_F)
 
     #define PATCH_SIZE         (%%PATCH_SIZE%%)
     #define HALF_PATCH_SIZE    (PATCH_SIZE / 2.0)
@@ -65,8 +64,15 @@ export const definesBladeVS = /** @type glsl */
 
 export const normalCoreVS = /** @type glsl */
 `
+    // FIX: vertex_normal undeclaration
+    vec3 vertex_normal;
+
     vec3 getLocalNormal(vec3 vertexNormal) {
-        return dLocalNormal;
+
+        // Set default shader normal
+        vertex_normal = dVertexNormal;
+
+        return dVertexNormal;
     }
 
     mat3 getNormalMatrix(mat4 modelMatrix) {
@@ -86,9 +92,12 @@ export const transformVS = /** @type glsl */
 
     vec4 getPosition() {
 
+        decodeBlade();
+        calculateBladeVertex();
+
         dModelMatrix = getModelMatrix();
 
-        vec4 posW      = dModelMatrix * vec4(dLocalPosition, 1.0);
+        vec4 posW      = dModelMatrix * vec4(dVertexPosition, 1.0);
         vec4 screenPos = matrix_viewProjection * posW;
 
         dPositionW = posW.xyz;
@@ -101,14 +110,14 @@ export const normalVS = /** @type glsl */
 `
     vec3 getNormal() {
         dNormalMatrix = matrix_normal;
-        return normalize(dNormalMatrix * dLocalNormal);
+        return normalize(dNormalMatrix * dVertexNormal);
     }
 `;
 
 export const uv0VS = /** @type glsl */
 `
     vec2 getUv0() {
-        return vec2(bedge, di * 2.0);
+        return vec2(dEdgeOfBlade, dDivVertexIndex * 2.0);
     }
 `;
 
@@ -116,7 +125,7 @@ export const uv0VS = /** @type glsl */
 export const startUv0VS = /** @type glsl */
 `    
     vec2 getUv0() {
-        return vec2(bedge, di * 2.0);
+        return vec2(dEdgeOfBlade, dDivVertexIndex * 2.0);
     }
 `;
 
@@ -125,35 +134,36 @@ export const baseVS = /** @type glsl */
     uniform mat4 matrix_viewProjection;
     uniform mat4 matrix_model;
     uniform mat3 matrix_normal;
-    
-    uniform highp usampler2D uDataMap;
-    uniform %%HEIGHT_MAP_SAMPLER%% ${terrainHeightMapParamName};
 
-    uniform float ${terrainMinHeightParamName};
+    uniform mediump usampler2D uDataMap;
+
+    uniform vec3  ${terrainScaleParamName};
     uniform float ${terrainMaxHeightParamName};
-
+    
     uniform vec3  ${drawPosParamName};       // centre of where we want to draw
     uniform float ${timeParamName};          // used to animate blades
     uniform float ${windIntensityParamName};
 
-    uniform vec2 ${offsetXZParamName}[8];    // center offset from draw pos lod 1
-    uniform vec2 ${offset2XZParamName}[16];  // center offset from draw pos lod 2
+    uniform vec2 ${lod1OffsetXZParamName}[8];  // center offset from draw pos lod 1
+    uniform vec2 ${lod2OffsetXZParamName}[16]; // center offset from draw pos lod 2
 
     attribute float ${vindexAttrName};
     attribute vec4 ${offsetAttrName};
     attribute vec4 ${shapeAttrName};
-    // mediump
 
-    float vi;     // vertex index for this side of the blade
-    float di;     // div index (0 .. BLADE_DIVS)
-    float hpct;   // percent of height of blade this vertex is at
-    float bside;  // front/back side of blade
-    float bedge;  // left/right edge (x=0 or x=1)
-    vec3 vpos;    // Vertex position - start with 2D shape, no bend applied
+    float dVertexIndex;           // vertex index for this side of the blade
+    float dDivVertexIndex;        // div index (0 .. BLADE_DIVS)
+    float dPercentOfBladeHeight;  // percent of height of blade this vertex is at
+    float dSideOfBlade;           // front/back side of blade
+    float dEdgeOfBlade;           // left/right edge (x=0 or x=1)
+    vec2 dBladeTerrainXZPos;      // blade xz position on terrain
+    vec3 dVertexPosition;         // Vertex position - start with 2D shape, no bend applied
+    vec3 dVertexNormal;           // Vertex normal
+    vec2 dTerrainPatchOffsetXZ;   // Terrain patch offset from center
+`;
 
-    vec2 dPatchOffsetXZ;
-    vec3 dLocalNormal;
-    vec3 dLocalPosition;
+export const baseClearSubVS = /** @type glsl */
+`
     vec3 dPositionW;
     mat4 dModelMatrix;
     mat3 dNormalMatrix;
@@ -161,33 +171,31 @@ export const baseVS = /** @type glsl */
 
 export const terrainHeightMapVS = 
 `
-    vec2 clampTerrainXZ(vec2 xz) {
-        return clamp(xz, vec2(0.0), TR_SIZE_F);
+    uvec2 clampTerrainXZ(vec2 xz) {
+        return uvec2(clamp(xz, vec2(0.0), TR_SIZE_F));
     }
 
-    ivec3 getTerrainChunkUV(vec2 origXZ) {
+    uvec3 getTerrainChunkBufferCoord(vec2 origXZ) {
 
-        vec2 xz = clampTerrainXZ(origXZ);
-        vec2 cc = floor(xz / HM_CHUNK_SIZE_F);
+        uvec2 xz = clampTerrainXZ(origXZ);
+        uvec2 ck = xz / HM_CHUNK_SIZE_U;
 
-        int localX = int(xz[0]) % HM_CHUNK_SIZE;
-        int localZ = int(xz[1]) % HM_CHUNK_SIZE;
-        int chunkX = int(cc[0]);
-        int chunkZ = int(cc[1]);
-        int level  = chunkZ * HM_NUM_CHUNKS_X + chunkX;
+        uint localX = xz[0] % HM_CHUNK_SIZE_U;
+        uint localZ = xz[1] % HM_CHUNK_SIZE_U;
+        uint level  = ck[1] * HM_NUM_CHUNKS_X_U + ck[0];
 
-        return ivec3(localX, localZ, level);
+        return uvec3(localX, localZ, level);
     }
-
+    
     float getTerrainHeightFactor(vec2 xz) {
-        ivec3 uv = getTerrainChunkUV(xz);
-        return getTerrainHeightFactorFromTexture(uv);
+        uvec3 coord = getTerrainChunkBufferCoord(xz);
+        return getTerrainHeightFactorFromTexture(coord);
     }
 
     float getTerrainHeight(vec2 xz) {
-        return getTerrainHeightFactor(xz) * (${terrainMaxHeightParamName} - ${terrainMinHeightParamName}) + ${terrainMinHeightParamName};
+        return getTerrainHeightFactor(xz) * ${terrainMaxHeightParamName};
     }
-
+    
     float getTerrainHeightInterpolated(vec2 xz) {
 
         // here we can calculate normal
@@ -210,7 +218,7 @@ export const terrainHeightMapVS =
 
         float interpolatedBottom = (x1z0 - x0z0) * factorX + x0z0;
         float interpolatedTop    = (x1z1 - x0z1) * factorX + x0z1;
-        float finalHeight = (interpolatedTop - interpolatedBottom) * factorZ + interpolatedBottom;
+        float finalHeight        = (interpolatedTop - interpolatedBottom) * factorZ + interpolatedBottom;
 
         return finalHeight;
     }
@@ -227,21 +235,21 @@ export const bladeDecoderVS = /** @type glsl */
             float lod2nVi  = mod(${vindexAttrName}, LOD2_BLADE_VERTS_COUNT);
             int patchIndex = int(${vindexAttrName} / LOD2_BLADE_VERTS_COUNT);
 
-            vi    = mod(lod2nVi, LOD2_BLADE_VERTS);
-            di    = floor(vi / 2.0);
-            hpct  = di / LOD2_BLADE_SEGS;
-            bside = floor(lod2nVi / LOD2_BLADE_VERTS);
+            dVertexIndex          = mod(lod2nVi, LOD2_BLADE_VERTS);
+            dDivVertexIndex       = floor(dVertexIndex / 2.0);
+            dPercentOfBladeHeight = dDivVertexIndex / LOD2_BLADE_SEGS;
+            dSideOfBlade          = floor(lod2nVi / LOD2_BLADE_VERTS);
 
-            dPatchOffsetXZ = ${offset2XZParamName}[patchIndex];
+            dTerrainPatchOffsetXZ = ${lod2OffsetXZParamName}[patchIndex];
         }
         else if (nnVi < LOD0_BLADE_VERTS_COUNT) {
 
-            vi    = mod(nnVi, LOD0_BLADE_VERTS);
-            di    = floor(vi / 2.0);
-            hpct  = di / LOD0_BLADE_SEGS;
-            bside = floor(nnVi / LOD0_BLADE_VERTS);
+            dVertexIndex          = mod(nnVi, LOD0_BLADE_VERTS);
+            dDivVertexIndex       = floor(dVertexIndex / 2.0);
+            dPercentOfBladeHeight = dDivVertexIndex / LOD0_BLADE_SEGS;
+            dSideOfBlade          = floor(nnVi / LOD0_BLADE_VERTS);
 
-            dPatchOffsetXZ = vec2(0.0);
+            dTerrainPatchOffsetXZ = vec2(0.0);
         }
         else {
 
@@ -249,23 +257,20 @@ export const bladeDecoderVS = /** @type glsl */
             float lod1nVi  = mod(lod1nnVi, LOD1_BLADE_VERTS_COUNT);
             int patchIndex = int(lod1nnVi / LOD1_BLADE_VERTS_COUNT);
 
-            vi    = mod(lod1nVi, LOD1_BLADE_VERTS);
-            di    = floor(vi / 2.0);
-            hpct  = di / LOD1_BLADE_SEGS;
-            bside = floor(lod1nVi / LOD1_BLADE_VERTS);
+            dVertexIndex          = mod(lod1nVi, LOD1_BLADE_VERTS);
+            dDivVertexIndex       = floor(dVertexIndex / 2.0);
+            dPercentOfBladeHeight = dDivVertexIndex / LOD1_BLADE_SEGS;
+            dSideOfBlade          = floor(lod1nVi / LOD1_BLADE_VERTS);
 
-            dPatchOffsetXZ = ${offsetXZParamName}[patchIndex];
+            dTerrainPatchOffsetXZ = ${lod1OffsetXZParamName}[patchIndex];
         }
         
-        bedge = mod(vi, 2.0);
+        dEdgeOfBlade = mod(dVertexIndex, 2.0);
     }
 `;
 
-// https://community.khronos.org/t/discarding-polygons-in-vertex-shader/103839/9
-export const startVS = /** @type glsl */
+export const calculateLocalVS =  /** @type glsl */
 `
-    ${startUv0VS}
-
     // Rotate by an angle
     vec2 rotate(float x, float y, float r) {
         float c = cos(r);
@@ -291,14 +296,13 @@ export const startVS = /** @type glsl */
 
         return 1.0;
     }
-
+    
+    varying vec2 vUvTerrainCoord;
     varying vec2 vUvCoord;
     varying vec3 vColor;
 
-    void main(void) {
-
-        decodeBlade();
-
+    void calculateBladeVertex() {
+        
         vec4 offset = ${offsetAttrName};
         vec4 shape  = ${shapeAttrName};
 
@@ -306,38 +310,26 @@ export const startVS = /** @type glsl */
         // this piece of grass be drawn at?
         vec2 quadCenterPos = ${drawPosParamName}.xz;
         vec2 bladeOffset   = offset.xy;
-        vec2 patchCenter   = floor((quadCenterPos - bladeOffset) / PATCH_SIZE) * PATCH_SIZE + HALF_PATCH_SIZE + dPatchOffsetXZ;
+        vec2 patchCenter   = floor((quadCenterPos - bladeOffset) / PATCH_SIZE) * PATCH_SIZE + HALF_PATCH_SIZE + dTerrainPatchOffsetXZ;
+
+        float drawPosAltitude = ${drawPosParamName}.y;
 
         // Find the blade mesh x,y position
         vec2 bladePos = patchCenter + bladeOffset;
 
-        float distanceFromBladeToQuadCenter = distance(bladePos, quadCenterPos);
-
         // Local quad center position in terrain
         // because the positions are shifted by half the size of the terrain
-        vec2 localQuadCenterPos = quadCenterPos + TR_SIZE_H_F;
+        // vec2 localQuadCenterPos = quadCenterPos + TR_SIZE_H_F;
 
-        float drawPosAltitude = ${drawPosParamName}.y;
-        float quadCenterAltitude = getTerrainHeight(localQuadCenterPos);
-        float distanceQuadCenterToDraw = distance(quadCenterAltitude, drawPosAltitude);
-
-        // if (distanceQuadCenterToDraw > MAX_ZINIT_DISTANCE) {
-        //    gl_Position = vec4(1.0, 1.0, 1.0, 0.0);
-        //    return;
-        // }
-
-        float degenerateByDistanceFromQuadCenterToDraw  = smoothstep(1.0, 0.8, distanceQuadCenterToDraw / MAX_ZINIT_DISTANCE);
-        float degenerateByDistanceFromBladeToQuadCenter = smoothstep(1.0, 0.92, distanceFromBladeToQuadCenter / CIRCLE_RADIUS);
+        float distanceFromBladeToQuadCenter = distance(bladePos, quadCenterPos);
+        float degenerateByDistanceFromBladeToQuadCenter = smoothstep(0.92, 1.0, CIRCLE_RADIUS / distanceFromBladeToQuadCenter);
 
         // Vertex position - start with 2D shape, no bend applied
-        vpos = vec3(
-            shape.x * (bedge - 0.5) * (1.0 - pow(hpct, 3.0)), // taper blade edges as approach tip
+        dVertexPosition = vec3(
+            shape.x * (dEdgeOfBlade - 0.5) * (1.0 - pow(dPercentOfBladeHeight, 3.0)), // taper blade edges as approach tip
             0.0, // flat y, unbent
-            shape.y * hpct // height of vtx, unbent
+            shape.y * dPercentOfBladeHeight // height of vtx, unbent
         );
-
-        // Start computing a normal for this vertex
-        vec3 normal = vec3(0.0, bside * -2.0 + 1.0, 0.0);
 
         // Apply blade's natural curve amount
         float curve = shape.w;
@@ -346,46 +338,46 @@ export const startVS = /** @type glsl */
         // unique properties to randomize its oscillation
         curve += shape.w + 0.125 * (sin(${timeParamName} * 4.0 + offset.w * 0.2 * shape.y + offset.x + offset.y));
 
-        // put lean and curve together
-        float rot = shape.z + curve * hpct;
-        vec2 rotv = vec2(cos(rot), sin(rot));
-
-        vpos.yz   = rotate(vpos.y, vpos.z, rotv);
-        normal.yz = rotate(normal.y, normal.z, rotv);
-
-        // rotation of this blade as a vector
-        rotv = vec2(cos(offset.w), sin(offset.w));
-
-        vpos.xy   = rotate(vpos.x, vpos.y, rotv);
-        normal.xy = rotate(normal.x, normal.y, rotv);
-
         // TODO
         float wind = 0.5;
 
         wind = (clamp(wind, 0.25, 1.0) - 0.25) * (1.0 / 0.75);
         wind = wind * wind * ${windIntensityParamName};
-        wind *= hpct; // scale wind by height of blade
+        wind *= dPercentOfBladeHeight; // scale wind by height of blade
         wind = -wind;
+
+        // Start computing a normal for this vertex
+        dVertexNormal = vec3(0.0, dSideOfBlade * -2.0 + 1.0, 0.0);
+
+        // put lean and curve together
+        float rot = shape.z + curve * dPercentOfBladeHeight;
+        vec2 rotv = vec2(cos(rot), sin(rot));
+
+        dVertexPosition.yz = rotate(dVertexPosition.y, dVertexPosition.z, rotv);
+        dVertexNormal.yz   = rotate(dVertexNormal.y, dVertexNormal.z, rotv);
+
+        // rotation of this blade as a vector
+        rotv = vec2(cos(offset.w), sin(offset.w));
+
+        dVertexPosition.xy = rotate(dVertexPosition.x, dVertexPosition.y, rotv);
+        dVertexNormal.xy   = rotate(dVertexNormal.x, dVertexNormal.y, rotv);
+
         rotv = vec2(cos(wind), sin(wind));
 
         // Wind blows in axis-aligned direction to make things simpler
-        vpos.yz   = rotate(vpos.y, vpos.z, rotv);
-        normal.yz = rotate(normal.y, normal.z, rotv);
-
-        // grass texture coordinate for this vertex
-        vUvCoord = getUv0();
-
-        // Vertex color must be brighter because it is multiplied with blade texture
-        // Each blade is randomly colourized a bit by its position
-        vColor = vec3(cos(offset.x), sin(offset.y), sin(offset.x));
+        dVertexPosition.yz = rotate(dVertexPosition.y, dVertexPosition.z, rotv);
+        dVertexNormal.yz   = rotate(dVertexNormal.y, dVertexNormal.z, rotv);
 
         // Local blade position in terrain
         // because the positions are shifted by half the size of the terrain
-        vec2 bladeLocalPos = bladePos + TR_SIZE_H_F;
+        dBladeTerrainXZPos = bladePos / ${terrainScaleParamName}.xz + TR_SIZE_H_F;
         
         // Sample the heightfield data texture to get altitude for this blade position
-        float bladeAltitude = getTerrainHeightInterpolated(bladeLocalPos);
-        float grassFactor   = getGrassFactor(bladeLocalPos);
+        float bladeAltitude = getTerrainHeightInterpolated(dBladeTerrainXZPos) * ${terrainScaleParamName}.y;
+        float grassFactor   = getGrassFactor(dBladeTerrainXZPos);
+
+        float distanceQuadCenterToDraw = distance(bladeAltitude, drawPosAltitude);
+        float degenerateByDistanceFromBladeToDraw = smoothstep(0.81, 1.0, MAX_ZINIT_DISTANCE / distanceQuadCenterToDraw);
 
         // Determine if we want the grass to appear or not
         // Use the noise channel to perturb the blade altitude grass starts growing at.
@@ -393,15 +385,35 @@ export const startVS = /** @type glsl */
         // float degenerateByNoise = (clamp(noisyAltitude, TRANSITION_LOW, TRANSITION_HIGH) - TRANSITION_LOW) * (1.0 / (TRANSITION_HIGH - TRANSITION_LOW));
 
         // Transition geometry toward degenerate as we approach terrain altitude
-        vpos *= grassFactor * degenerateByDistanceFromQuadCenterToDraw * degenerateByDistanceFromBladeToQuadCenter; // degenerateByNoise
+        dVertexPosition *= grassFactor * degenerateByDistanceFromBladeToDraw * degenerateByDistanceFromBladeToQuadCenter; // degenerateByNoise
 
         // Translate to world coordinates
-        vpos.x += bladePos.x;
-        vpos.y += bladePos.y;
-        vpos.z += bladeAltitude;
+        dVertexPosition.x += bladePos.x;
+        dVertexPosition.y += bladePos.y;
+        dVertexPosition.z += bladeAltitude;
         
-        dLocalPosition = vpos.xzy;
-        dLocalNormal   = normal.xzy;
+        // Translate to xz plane
+        dVertexPosition = dVertexPosition.xzy;
+        dVertexNormal   = dVertexNormal.xzy;
+
+        // grass texture coordinate for this vertex
+        vUvCoord = vec2(dEdgeOfBlade, dDivVertexIndex * 2.0);
+
+        // terrain texture coordinate for this vertex
+        vUvTerrainCoord = dBladeTerrainXZPos / TR_SIZE_F;
+
+        // Vertex color must be brighter because it is multiplied with blade texture
+        // Each blade is randomly colourized a bit by its position
+        vColor = vec3(cos(${offsetAttrName}.x), sin(${offsetAttrName}.y), sin(${offsetAttrName}.x));
+    }
+`;
+
+// https://community.khronos.org/t/discarding-polygons-in-vertex-shader/103839/9
+export const startVS = /** @type glsl */
+`
+    ${startUv0VS}
+
+    void main(void) {
 
         gl_Position = getPosition();
 `;
@@ -412,14 +424,29 @@ export const diffusePS = /** @type glsl */
     uniform vec3 uDiffuseColor;
     uniform vec3 uDiffuseColorRandom;
 
+    varying vec2 vUvTerrainCoord;
     varying vec2 vUvCoord;
     varying vec3 vColor;
 
-    vec4 mGamma = vec4(2.2);
+    vec3 autoGammaCorrectInput(vec3 v) {
+        #if defined(GAMMA_NORMALIZE)
+            return gammaCorrectInput(v);
+        #else
+            return v;
+        #endif
+    }
+
+    vec4 autoGammaCorrectInput(vec4 v) {
+        #if defined(GAMMA_NORMALIZE)
+            return gammaCorrectInput(v);
+        #else
+            return v;
+        #endif
+    }
 
     void getAlbedo() {
 
-        vec3 tex = pow(texture2D(uDiffuseTex, vUvCoord), mGamma).rgb;
+        vec3 tex = autoGammaCorrectInput(texture2D(uDiffuseTex, vUvCoord).rgb);
 
         dAlbedo = tex * uDiffuseColor + vColor * uDiffuseColorRandom;
     }
@@ -429,14 +456,18 @@ export const chunks = {
 
     ...heightMapFactorsChunks,
 
+    heightMapSamplerBugFix,
+
     definesVS,
     definesBladeVS,
     bladeDecoderVS,
+    calculateLocalVS,
 
     terrainHeightMapVS,
 
     // Vertex
     baseVS,
+    baseClearSubVS,
     transformVS,
     transformDeclVS,
     instancingVS,
@@ -462,7 +493,8 @@ export interface IGrassShaderOptions {
     radius: number,
     transitionLow: number,
     transitionHigh: number,
-    chunksStore?: typeof chunks
+    chunksStore?: typeof chunks,
+    engineVersion?: 'v1' | 'v2'
 }
 
 export function getGrassShaderChunks({
@@ -477,49 +509,71 @@ export function getGrassShaderChunks({
     radius,
     transitionLow,
     transitionHigh,
-    chunksStore = chunks
+    chunksStore = chunks,
+    engineVersion = 'v1',
 }: IGrassShaderOptions): Record<string, string> {
 
     const definesVS = chunksStore.definesVS
-    .replace('%%HM_NUM_CHUNKS_X%%', String((width - 1) / (heightMapChunkSize - 1) | 0))
-    .replace('%%HM_CHUNK_SIZE%%', String(heightMapChunkSize | 0))
-    .replace('%%TR_SIZE_X%%', String(width))
-    .replace('%%TR_SIZE_Z%%', String(depth))
-    .replace('%%TR_SIZE_X_F%%', width.toFixed(1))
-    .replace('%%TR_SIZE_Z_F%%', depth.toFixed(1))
-    .replace('%%BLADE_HEIGHT_TALL%%', bladeMaxHeight.toFixed(1))
-    .replace('%%PATCH_SIZE%%', radius.toFixed(1))
-    .replace('%%TRANSITION_LOW%%', transitionLow.toString())
-    .replace('%%TRANSITION_HIGH%%', transitionHigh.toString());
-
-    const definesBladeVS = chunksStore.definesBladeVS
-    .replace('%%LOD0_BLADE_SEGS%%', lod0BladeSegs.toFixed(1))
-    .replace('%%LOD1_BLADE_SEGS%%', lod1BladeSegs.toFixed(1))
-    .replace('%%LOD2_BLADE_SEGS%%', lod2BladeSegs.toFixed(1));
-
-    const clearBaseVS = chunksStore.baseVS
-    .replace('%%HEIGHT_MAP_SAMPLER%%', getSamplerType(heightMapFormat));
+        .replace('%%HM_NUM_CHUNKS_X%%', String((width - 1) / (heightMapChunkSize - 1) | 0))
+        .replace('%%HM_CHUNK_SIZE%%', String(heightMapChunkSize | 0))
+        .replace('%%TR_SIZE_X%%', String(width))
+        .replace('%%TR_SIZE_Z%%', String(depth))
+        .replace('%%TR_SIZE_X_F%%', width.toFixed(1))
+        .replace('%%TR_SIZE_Z_F%%', depth.toFixed(1))
+        .replace('%%BLADE_HEIGHT_TALL%%', bladeMaxHeight.toFixed(1))
+        .replace('%%PATCH_SIZE%%', radius.toFixed(1))
+        .replace('%%TRANSITION_LOW%%', transitionLow.toString())
+        .replace('%%TRANSITION_HIGH%%', transitionHigh.toString());
     
-    const baseVS = definesVS + definesBladeVS + clearBaseVS;
+    const definesBladeVS = chunksStore.definesBladeVS
+        .replace('%%LOD0_BLADE_SEGS%%', lod0BladeSegs.toFixed(1))
+        .replace('%%LOD1_BLADE_SEGS%%', lod1BladeSegs.toFixed(1))
+        .replace('%%LOD2_BLADE_SEGS%%', lod2BladeSegs.toFixed(1));
 
+    const baseClearVS = chunksStore.baseVS + chunksStore.heightMapSamplerBugFix.replaceAll('%%HEIGHT_MAP_SAMPLER%%', getSamplerType(heightMapFormat));
     const terrainHeightFactorVS = getTerrainHeightFactorVS(heightMapFormat, chunksStore);
-    const startVS = terrainHeightFactorVS
-        + chunksStore.terrainHeightMapVS
-        + chunksStore.bladeDecoderVS
-        + chunksStore.startVS;
+
+    const transformVS = terrainHeightFactorVS
+                      + chunksStore.terrainHeightMapVS
+                      + chunksStore.bladeDecoderVS
+                      + chunksStore.calculateLocalVS
+                      + chunksStore.transformVS;
+
+    if (engineVersion === 'v2') {
+        
+        const transform2VS = definesVS + definesBladeVS + baseClearVS + transformVS;
+
+        return {
+            // Vertex
+            transformVS: transform2VS,
+            transformCoreVS: "",
+            transformInstancingVS: "",
+            normalCoreVS: chunksStore.normalCoreVS,
+
+            // Fragment
+            diffusePS: chunksStore.diffusePS,
+        };
+    }
+    
+    const baseVS = definesVS +
+                   definesBladeVS +
+                   baseClearVS +
+                   chunksStore.baseClearSubVS;
+
+    const diffusePS = '#define GAMMA_NORMALIZE\r\n'
+                    + chunksStore.diffusePS;
 
     return {
-        baseVS: baseVS,
-        transformVS: chunksStore.transformVS,
+        // Vertex
+        baseVS,
+        startVS: chunksStore.startVS,
+        transformVS: transformVS,
         transformDeclVS: chunksStore.transformDeclVS,
         instancingVS: chunksStore.instancingVS,
-        //transformInstancingVS: chunks.transformInstancingVS,
-        //normalCoreVS: chunks.normalCoreVS,
         normalVS: chunksStore.normalVS,
         uv0VS: chunksStore.uv0VS,
-        startVS: startVS,
 
         // Fragment
-        diffusePS: chunksStore.diffusePS,
+        diffusePS: diffusePS,
     };
 }

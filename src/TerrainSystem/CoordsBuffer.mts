@@ -2,7 +2,6 @@ import { IVector2, IVector3, RefObject, float, int } from "../Shared/Types.mjs";
 import AbsHeightMap, { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
 
 export interface IVertexHeightsInfo {
-    minHeight: float;
     maxHeight: float;
 }
 

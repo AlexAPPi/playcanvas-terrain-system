@@ -78,10 +78,10 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
     public get dataNumChunksZ()      { return this._dataNumChunksZ; }
     public get dataChunkSizeFactor() { return this._dataChunkSizeFactor; }
 
-    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float);
-    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int);
-    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, minHeight: float, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
-        super(width, depth, minHeight, maxHeight, buffer! /** TS huck */, itemSize, itemHeightIndexOffset);
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, maxHeight: float);
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, maxHeight: float, buffer: TData, itemSize?: int, itemHeightIndexOffset?: int);
+    public constructor(width: int, depth: int, patchSize: int, dataChunkSize: int, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
+        super(width, depth, maxHeight, buffer! /** TS huck */, itemSize, itemHeightIndexOffset);
         this._minHeightCoord = [0, 0];
         this._maxHeightCoord = [0, 0];
         this._setPatchSize(patchSize);
@@ -101,15 +101,17 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
         this._dataChunkSize  = getOrThrowDataChunkSize(this._patchSize, value);
         this._dataNumChunksX = ((this.width - 1) / (this._dataChunkSize - 1)) | 0;
         this._dataNumChunksZ = ((this.depth - 1) / (this._dataChunkSize - 1)) | 0;
-        this._dataChunkSizeFactor = this._patchSize / (this._dataChunkSize + this._patchSize - (this._dataChunkSize % this._patchSize));
+        this._dataChunkSizeFactor = this._patchSize === this._dataChunkSize
+            ? 1.0
+            : this._patchSize / (this._dataChunkSize + this._patchSize - (this._dataChunkSize % this._patchSize));
     }
     
     public override getIndex(x: int, z: int): int {
 
         const localX = x % this._dataChunkSize;
         const localZ = z % this._dataChunkSize;
-        const chunkX = Math.floor(x / this._dataChunkSize);
-        const chunkZ = Math.floor(z / this._dataChunkSize);
+        const chunkX = x / this._dataChunkSize | 0;
+        const chunkZ = z / this._dataChunkSize | 0;
 
         const chunkOffset = (chunkZ * this._dataNumChunksX + chunkX) * (this._dataChunkSize ** 2);
         const localIndex  = (localZ * this._dataChunkSize + localX);
@@ -129,7 +131,7 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
         const chunkLevel  = chunkZ * this.dataNumChunksX + chunkX;
         const chunkOffset = chunkLevel * size * this.data.BYTES_PER_ELEMENT;
         const count       = size * (this.data.BYTES_PER_ELEMENT / type.BYTES_PER_ELEMENT);
-        return new type(this.data.buffer, chunkOffset, count);
+        return new type(this.data.buffer, this.data.byteOffset + chunkOffset, count);
     }
 
     public getChunksBuffers(type: Float32ArrayConstructor): Float32Array[];
@@ -147,31 +149,31 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
                 result[index] = this.getChunkBuffer(type, chunkX, chunkZ);
             }
         }
-
+        
         return result;
     }
 
     public getEntriesPatchMin(x: int, z: int) {
-        const patchX = Math.floor(x / this._patchSize);
-        const patchZ = Math.floor(z / this._patchSize);
+        const patchX = x / this._patchSize | 0;
+        const patchZ = z / this._patchSize | 0;
         return this.getPatchMin(patchX, patchZ);
     }
 
     public getEntriesPatchMax(x: int, z: int) {
-        const patchX = Math.floor(x / this._patchSize);
-        const patchZ = Math.floor(z / this._patchSize);
+        const patchX = x / this._patchSize | 0;
+        const patchZ = z / this._patchSize | 0;
         return this.getPatchMax(patchX, patchZ);
     }
 
     public getEntriesPatchMinFactor(x: int, z: int) {
-        const patchX = Math.floor(x / this._patchSize);
-        const patchZ = Math.floor(z / this._patchSize);
+        const patchX = x / this._patchSize | 0;
+        const patchZ = z / this._patchSize | 0;
         return this.getPatchMinFactor(patchX, patchZ);
     }
 
     public getEntriesPatchMaxFactor(x: int, z: int) {
-        const patchX = Math.floor(x / this._patchSize);
-        const patchZ = Math.floor(z / this._patchSize);
+        const patchX = x / this._patchSize | 0;
+        const patchZ = z / this._patchSize | 0;
         return this.getPatchMaxFactor(patchX, patchZ);
     }
 
@@ -217,10 +219,7 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
         this._minHeightCoord[1] = 0;
         this._maxHeightCoord[0] = 0;
         this._maxHeightCoord[1] = 0;
-
-        for (let i = 0; i < this._minMaxHeightCoords.length; i++) {
-            this._minMaxHeightCoords[i] = 0;
-        }
+        this._minMaxHeightCoords.fill(0);
     }
 
     public recalculateAABB() {
@@ -232,7 +231,7 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
 
         let minFactor = 1;
         let maxFactor = 0;
-
+        
         for (let patchZ = 0; patchZ < this._numPatchesZ; patchZ++) {
 
             for (let patchX = 0; patchX < this._numPatchesX; patchX++) {
@@ -272,8 +271,8 @@ export abstract class AbsPatchedHeightMap<TData extends Float32Array | Uint16Arr
 
             for (let x = fixedMinX; x < fixedMaxX; x += this._patchSize) {
                 
-                const patchX   = Math.floor(x / this._patchSize);
-                const patchZ   = Math.floor(z / this._patchSize);
+                const patchX   = x / this._patchSize | 0;
+                const patchZ   = z / this._patchSize | 0;
                 const patchI   = patchZ * this._numPatchesX + patchX;
                 const minIndex = patchI * minMaxStackSize;
                 const maxIndex = minIndex + this._patchesSegmentSize;

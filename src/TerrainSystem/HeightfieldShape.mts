@@ -142,7 +142,7 @@ export default class HeightfieldShape {
 
         this._boundingBox = {
             minX: -halfWidth,
-            minY: this._heightMap.minHeight,
+            minY: 0,
             minZ: -halfDepth,
             maxX: halfWidth,
             maxY: this._heightMap.maxHeight,

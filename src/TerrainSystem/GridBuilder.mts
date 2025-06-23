@@ -157,7 +157,7 @@ export class GridBuilder {
     private _initIndicesLODSingle(index: int, indices: Uint32Array, lodCore: int, lodLeft: int, lodRight: int, lodTop: int, lodBottom: int): int {
 
         const width   = this.patchSize;
-        const fanStep = Math.pow(2, lodCore + 1);       // lod = 0 --> 2, lod = 1 --> 4, lod = 2 --> 8, etc
+        const fanStep = Math.pow(2, lodCore + 1);      // lod = 0 --> 2, lod = 1 --> 4, lod = 2 --> 8, etc
         const endPos  = this.patchSize - 1 - fanStep;  // patch size 5, fan step 2 --> EndPos = 2; patch size 9, fan step 2 --> EndPos = 6
 
         for (let z = 0 ; z <= endPos ; z += fanStep) {

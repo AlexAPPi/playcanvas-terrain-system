@@ -1,11 +1,13 @@
 import { int } from "../Shared/Types.mjs";
 import { BOTTOM, LEFT, RIGHT, TOP } from "../TerrainSystem/LodInfo.mjs";
-import { instDataSize, PatchInstancing } from "../TerrainSystem/PatchInstancing.mjs";
+import { instDataSize, PatchInstancing, TInstCoordsOffsetArrType } from "../TerrainSystem/PatchesInstancing.mjs";
+import { ITerrainPatchesInstancing } from "./ITerrainPatchesInstancing.mjs";
 
-export class TerrainPathcesInstancing extends PatchInstancing<pcx.MeshInstance> {
+export class TerrainPathcesInstancing extends PatchInstancing<pcx.MeshInstance> implements ITerrainPatchesInstancing<TInstCoordsOffsetArrType> {
 
-    public enabled: boolean = false;
-
+    bufferType = TInstCoordsOffsetArrType;
+    itemBufferSize = 2;
+    
     public get meshInstanceCount() { return this.data.length * LEFT * RIGHT * TOP * BOTTOM; }
 
     public appendMeshInstances(arr: pcx.MeshInstance[], offset: int = 0) {
@@ -80,7 +82,7 @@ export class TerrainPathcesInstancing extends PatchInstancing<pcx.MeshInstance> 
                                     const length = chunk.count * instDataSize;
                                     const vertexBuffer = chunkObject.instancingData.vertexBuffer;
 
-                                    this._writeBuffer(vertexBuffer, chunk.data, length);
+                                    this._updateBuffer(vertexBuffer, chunk.data, length);
                                 }
                             }
                         }
@@ -90,7 +92,7 @@ export class TerrainPathcesInstancing extends PatchInstancing<pcx.MeshInstance> 
         }
     }
 
-    private _writeBuffer(vertexBuffer: pcx.VertexBuffer | null, data: Uint16Array, length: int) {
+    private _updateBuffer(vertexBuffer: pcx.VertexBuffer | null, data: TInstCoordsOffsetArrType, length: int) {
 
         if (vertexBuffer) {
 

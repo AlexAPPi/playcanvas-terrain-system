@@ -37,16 +37,15 @@ export class GeomipGrid extends GeomipGridRenderPreparer {
         this._heightMap.recalculateAABB();
     }
 
-    public normalizeHeightMap(minHeight?: float, maxHeight?: float) {
+    public normalizeHeightMap(maxHeight?: float) {
         
-        minHeight ??= this._heightMap.minHeight;
         maxHeight ??= this._heightMap.maxHeight;
 
-        this._heightMap.normalize(minHeight, maxHeight);
+        this._heightMap.normalize(maxHeight);
     }
 
-    public setMinMaxHeight(minHeight: float, maxHeight: float) {
-        this._heightMap.setMinMaxHeight(minHeight, maxHeight);
+    public setMaxHeight(maxHeight: float) {
+        this._heightMap.setMaxHeight(maxHeight);
     }
 
     public appendHeightMap(

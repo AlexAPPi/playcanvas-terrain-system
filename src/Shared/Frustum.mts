@@ -1,5 +1,6 @@
-import { float } from "../Shared/Types.mjs";
+import { float } from "./Types.mjs";
 import { IFrustum } from "../TerrainSystem/GeomipGridRenderPreparer.mjs";
+import { drawPoint } from "./Debug.mjs";
 
 const tmpVec = new pc.Vec3();
 const tmpRad = new pc.Vec3();
