@@ -1,21 +1,25 @@
-import { drawDirectionVector, drawPoint } from "../Shared/Debug.mjs";
-import { MidpointDispTerrain } from "../TerrainSystem/MidpointDispTerrain.mjs";
-import TerrainRaycastResult from "../TerrainSystem/TerrainRaycastResult.mjs";
-import HeightMap from "../TerrainSystem/HeightMap.mjs";
-import TerrainRenderPreparer from "../TerrainHelpers/TerrainRenderPreparer.mjs";
-import type { IBrushSettings } from "../TerrainHelpers/Brush.mjs";
-import ColorPainter from "../TerrainHelpers/ColorPainter.mjs";
-import TerrainPatches from "../TerrainHelpers/TerrainPatches.mjs";
-import { terrainHeightsCompressAlgoritm, terrainHeightsCompressAlgoritmDefault, terrainPatchSizeEnum, terrainPatchSizeEnumDefault, terrainSizeEnum, terrainSizeEnumDefault } from "../TerrainHelpers/Enums.mjs";
-import { terrainMaxHeightParamName, terrainSplatMapParamName, } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
-import HeightfieldShape from "../TerrainSystem/HeightfieldShape.mjs";
-import PatchedHeightMap from "../TerrainSystem/PatchedHeightMap.mjs";
-import CompressedPatchedHeightMap, { TCompressAlgoritm } from "../TerrainSystem/CompressedPatchedHeightMap.mjs";
-import { Frustum } from "../Shared/Frustum.mjs";
-import { mapTitleEnum } from "../Shared/EnumConverter.mjs";
+import { drawDirectionVector, drawPoint } from "../Extras/Debug.mjs";
+import MidpointDispHeightfield from "../Core/MidpointDispHeightfield.mjs";
+import HeightfieldRaycastResult from "../Core/HeightfieldRaycastResult.mjs";
+import HeightMap from "../Core/HeightMap.mjs";
+import type { IBrushSettings } from "../Heightfield/Brush.mjs";
+import ColorPainter from "../Heightfield/ColorPainter.mjs";
+import { fieldHeightsCompressAlgoritm, fieldHeightsCompressAlgoritmDefault, fieldPatchSizeEnum, fieldPatchSizeEnumDefault, fieldSizeEnum, fieldSizeEnumDefault } from "../Heightfield/Enums.mjs";
+import { cameraPositionParamName, layersDiffuseParamName, layersFlagsParamName, layersOffsetParamName, layersScaleParamName, maxHeightParamName, splatMapParamName, } from "../Heightfield/ShaderChunks.mjs";
+import HeightfieldShape from "../Core/HeightfieldShape.mjs";
+import PatchedHeightMap from "../Core/PatchedHeightMap.mjs";
+import CompressedPatchedHeightMap, { TCompressAlgoritm } from "../Core/CompressedPatchedHeightMap.mjs";
+import { mapTitleEnum } from "../Extras/EnumConverter.mjs";
 import { getBuffer } from "../AmmoIntegration/AmmoIntegration.mjs";
-import { TerrainPathcesInstancing } from "../TerrainHelpers/TerrainPatchesInstancing.mjs";
-import { TerrainPathcesCombineInstancing } from "../TerrainHelpers/TerrainPatchesCombineInstancing.mjs";
+import { IHeightMapFileImportOptions } from "../Core/AbsHeightMapFileIO.mjs";
+import LodState from "../Core/LodState.mjs";
+import GPUHeightMapBuffer from "../Heightfield/GPUHeightMapBuffer.mjs";
+import PatchesSphereBuffer from "../Core/PatchesSphereBuffer.mjs";
+import PatchesManager from "../Core/PatchesManager.mjs";
+import MeshInstanceFactory from "../Heightfield/MeshInstanceFactory.mjs";
+import GPUBuffersManager from "../Heightfield/GPUBuffersManager.mjs";
+import PatchesRenderPreparer from "../Heightfield/PatchesRenderPreparer.mjs";
+import GPUWireframeBufferManager from "../Heightfield/GPUWireframeBuffersManager.mjs";
 
 export interface ITerrainHeightMapAttribute {
     readonly file: pcx.Asset;
@@ -49,7 +53,6 @@ export enum RenderMode {
     Standard = 1,
     InstancingAccelerator = 2,
     CombineInstancingAccelerator = 3,
-    CustomForwardRenderer = 4,
 }
 
 export class Terrain extends pc.ScriptType {
@@ -79,24 +82,22 @@ export class Terrain extends pc.ScriptType {
 
     public get shape() { return this._heightFieldShape; }
     public get object() { return this._terrain; }
-    public get patches() { return this._patchesStore; }
-    public get renderPreparer() { return this._renderPreparer; }
 
     private _lock = 0;
 
     public get lock() { return this._lock; }
 
     private _localCameraPosition = new pc.Vec3();
-    private _terrain: MidpointDispTerrain;
-    private _patchesStore: TerrainPatches;
+    private _terrain: MidpointDispHeightfield;
     private _roughness = 1.0;
 
     private _heightFieldShape: HeightfieldShape;
-    private _raycastResult: TerrainRaycastResult;
+    private _raycastResult: HeightfieldRaycastResult;
     private _rayStart = new pc.Vec3();
     private _rayEnd = new pc.Vec3();
     private _rayDirection = new pc.Vec3();
     private _ray = new pc.Ray();
+    private _cameraPos = new Array<number>(3);
 
     private _lastMouseMoveEvent: pcx.MouseEvent;
 
@@ -109,11 +110,7 @@ export class Terrain extends pc.ScriptType {
     private _brushOpacity: number;
     private _brushOpacityStep: number = 0.01;
     private _intersectsRayResult: boolean = false;
-    private _material: pcx.StandardMaterial;
     private _layersDiffuse: pcx.Texture | undefined;
-
-    private _renderPreparer: TerrainRenderPreparer;
-    private _frustum: Frustum;
 
     public addLock() {
         this._lock++;
@@ -131,29 +128,38 @@ export class Terrain extends pc.ScriptType {
         this._initBrush();
         this._initTerrain();
 
-        this._createTerrainMaterial();
-        this._updateTerrainMaterialParameters();
+        this._updateMaterialParameters();
 
         this._updateLayers();
 
-        this._updateHeightMapFromAttr();
         this._updateBrush();
         this._updatePainterMaterial();
         this._updateMesh();
+        this._updateHeightMapFromAttr();
 
         this.on('attr:renderMode', () => {
-            this._renderPreparer.patchesStore.customForwardRenderer = this.renderMode === RenderMode.CustomForwardRenderer;
-            this._renderPreparer.patchesStore.setMaterial(this._material);
-            this._renderPreparer.patchesStore.setInstancing(
-                this.renderMode === RenderMode.InstancingAccelerator ? new TerrainPathcesInstancing() :
-                this.renderMode === RenderMode.CombineInstancingAccelerator ? new TerrainPathcesCombineInstancing() :
-                undefined
+            this._defaultPatchesPreparer.setInstancingType(
+                this.renderMode === RenderMode.CombineInstancingAccelerator ? 'combine' :
+                this.renderMode === RenderMode.InstancingAccelerator ? 'simple' :
+                false
             );
         });
 
-        this.on('attr:wireframe', () => { this._renderPreparer.wireframe = this.wireframe; });
-        this.on('attr:castShadow', () => { this._renderPreparer.castShadow = this.castShadow; });
-        this.on('attr:receiveShadow', () => { this._renderPreparer.receiveShadow = this.receiveShadow; });
+        this.on('attr:castShadow', () => {
+            this._defaultPatchesPreparer.castShadow = this.castShadow;
+        });
+
+        this.on('attr:receiveShadow', () => {
+            this._defaultPatchesPreparer.receiveShadow = this.receiveShadow;
+        });
+
+        this.on('attr:wireframe', () => {
+            this._defaultPatchesPreparer.wireframe = this.wireframe;
+
+            if (!this.wireframe) {
+                this._wireframeBuffersManager.free();
+            }
+        });
 
         this.on('attr:activeLayer', () => {
             this._updatePainterMaterial();
@@ -170,18 +176,21 @@ export class Terrain extends pc.ScriptType {
 
         this.on('attr:height', () => {
             this._terrain.setMaxHeight(this.height);
-            this._updateTerrainMaterialParameters();
+            this._spheresBuffer.recalculate();
+            this._meshFactory.updateAabb();
+            this._defaultPatchesPreparer.updateAabb();
+            this._updateMaterialParameters();
         });
 
         this.on('attr:zFar', () => {
-            this._terrain.setZFar(this.zFar);
+            this._defaultPatchesLodState.setZFar(this.zFar);
         });
     }
 
     private _initBrush() {
         const splatMap = this.painterSettings.splatMap.resource as pcx.Texture;
         this._brushHeightMap = new HeightMap(256, 256, 100);
-        this._colorPainter = new ColorPainter(this.app, splatMap);
+        this._colorPainter = new ColorPainter(this.app, splatMap, this.layer);
     }
 
     private _updatePainterMaterial() {
@@ -238,52 +247,80 @@ export class Terrain extends pc.ScriptType {
             const shape = new Ammo.btAlexHeightfieldTerrainShape(hm, false);
 
             const groundTransform = new Ammo.btTransform();
+            const position = new Ammo.btVector3(0, this.height / 2, 0);
 
             groundTransform.setIdentity();
-            groundTransform.setOrigin(new Ammo.btVector3(0, this.height / 2, 0));
+            groundTransform.setOrigin(position);
 
             const groundMass = 0;
             const groundLocalInertia = new Ammo.btVector3(0, 0, 0);
             const groundMotionState = new Ammo.btDefaultMotionState(groundTransform);
-            const groundBody = new Ammo.btRigidBody(new Ammo.btRigidBodyConstructionInfo(groundMass, groundMotionState, shape, groundLocalInertia));
+            const groundConstrInfo = new Ammo.btRigidBodyConstructionInfo(groundMass, groundMotionState, shape, groundLocalInertia);
+            const groundBody = new Ammo.btRigidBody(groundConstrInfo);
 
             this.app.systems.rigidbody!.dynamicsWorld.addRigidBody(groundBody);
+
+            Ammo.destroy(position);
+            Ammo.destroy(groundTransform);
         }
 
         return buffer;
     }
 
+    private _spheresBuffer: PatchesSphereBuffer;
+    private _heightMapBuffer: GPUHeightMapBuffer;
+    private _buffersManager: GPUBuffersManager;
+    private _wireframeBuffersManager: GPUWireframeBufferManager;
+    private _meshFactory: MeshInstanceFactory;
+    private _patchesManager: PatchesManager;
+
+    private _defaultPatchesLodState: LodState;
+    private _defaultPatchesPreparer: PatchesRenderPreparer;
+
+    public get heightMapTexture() { return this._heightMapBuffer.texture; }
+    public get aabb() { return this._meshFactory.aabb; }
+
     private _initTerrain() {
         
-        const tmpChunkSize = this.patchSize * 2 - 1; // 257, 513, ...
+        const tmpChunkSize = this.patchSize * 2 - 1;
         const chunkSize = Math.min(this.width, this.depth, tmpChunkSize);
         const buffer = this._initHeightMapBuffer(chunkSize);
         const heightMap = this.compressAlgoritm !== 'none'
         ? new CompressedPatchedHeightMap(this.width, this.depth, this.patchSize, chunkSize, this.height, this.compressAlgoritm, buffer)
         : new PatchedHeightMap(this.width, this.depth, this.patchSize, chunkSize, this.height, buffer);
 
-        this._terrain = new MidpointDispTerrain(heightMap, this.zFar);
+        this._terrain = new MidpointDispHeightfield(heightMap);
         this._heightFieldShape = new HeightfieldShape(heightMap);
-        this._raycastResult = new TerrainRaycastResult();
-        this._frustum = new Frustum();
+        this._raycastResult = new HeightfieldRaycastResult();
 
-        this._patchesStore = new TerrainPatches(this._terrain);
-        this._renderPreparer = new TerrainRenderPreparer(this._patchesStore, {
-            wireframe: this.wireframe,
-            castShadow: this.castShadow,
-            receiveShadow: this.receiveShadow,
-        });
-        
-        console.log(this._terrain, this._heightFieldShape, this._renderPreparer);
+        this._spheresBuffer = new PatchesSphereBuffer(heightMap, this.entity.getWorldTransform());
+        this._heightMapBuffer = new GPUHeightMapBuffer(this.app, this._terrain);
+        this._buffersManager = new GPUBuffersManager(this._heightMapBuffer);
+        this._wireframeBuffersManager = new GPUWireframeBufferManager(this._buffersManager, this._terrain.lodInfo);
+
+        this._meshFactory = new MeshInstanceFactory(this._buffersManager, this._wireframeBuffersManager);
+        this._patchesManager = new PatchesManager(this._terrain, this._spheresBuffer);
+
+        this._defaultPatchesLodState = new LodState(this._patchesManager.lodManager, this.zFar);
+        this._defaultPatchesPreparer = new PatchesRenderPreparer(
+            this._defaultPatchesLodState,
+            this._meshFactory,
+            this.entity,
+            {
+                wireframe: this.wireframe,
+                castShadow: this.castShadow,
+                receiveShadow: this.receiveShadow,
+            }
+        );
+
+        this._patchesManager.addState(this._defaultPatchesPreparer);
+
+        console.log(this._terrain, this._heightFieldShape);
     }
 
-    private _createTerrainMaterial() {
-        this._material = TerrainPatches.createMaterial();
-    }
-
-    private _updateTerrainMaterialParameters() {
-        this._material.setParameter(terrainSplatMapParamName, this._colorPainter.background);
-        this._material.setParameter(terrainMaxHeightParamName, this._terrain.maxHeight);
+    private _updateMaterialParameters() {
+        this._defaultPatchesPreparer.material.setParameter(splatMapParamName, this._colorPainter.background);
+        this._defaultPatchesPreparer.material.setParameter(maxHeightParamName, this._terrain.maxHeight);
     }
 
     private _updateLayers() {
@@ -297,7 +334,7 @@ export class Terrain extends pc.ScriptType {
         let flags    = [];
         let scales   = [];
         let offsets  = [];
-        let diffuses = [];
+        let diffuses = [] as any[];
         let normals  = [];
 
         for (let i = 0; i < maxCount; i++) {
@@ -312,17 +349,20 @@ export class Terrain extends pc.ScriptType {
 
                 if (diffuse) {
 
-                    const texture = diffuse.resource as pcx.Texture;
+                    const diffuseTexture = diffuse.resource as pcx.Texture;
 
                     flag++;
                     length++;
-                    diffuses.push(texture.getSource());
+                    diffuses.push(diffuseTexture.getSource());
                     scales.push(layer.size.x, layer.size.y);
                     offsets.push(layer.offset.x, layer.offset.y);
 
                     if (normalMap) {
+
+                        const normalTexture = normalMap.resource as pcx.Texture;
+
                         flag++;
-                        normals.push((normalMap.resource as pcx.Texture).getSource());                    
+                        normals.push(normalTexture.getSource());
                     }
                 }
             }
@@ -334,7 +374,7 @@ export class Terrain extends pc.ScriptType {
         //this._layersDiffuse = this.layers[0].diffuse.resource as pcx.Texture;
         this._layersDiffuse = new pc.Texture(this.app.graphicsDevice, {
             name: 'terrainLayersDiffuse',
-            format: pc.PIXELFORMAT_RGBA8,
+            format: pc.PIXELFORMAT_SRGBA8,
             width: width,
             height: height,
             arrayLength: length,
@@ -345,27 +385,24 @@ export class Terrain extends pc.ScriptType {
             addressU: pc.ADDRESS_REPEAT,
             addressV: pc.ADDRESS_REPEAT,
             addressW: pc.ADDRESS_CLAMP_TO_EDGE,
-            levels: [ diffuses as any ]
+            levels: [ diffuses ]
         });
         this._layersDiffuse.upload();
 
         console.log(this._layersDiffuse);
-
-        this._material.setParameter(`uTerrainLayersCount`, length);
-        this._material.setParameter(`uTerrainLayersDiffuse`, this._layersDiffuse);
-        this._material.setParameter(`uTerrainLayersFlags[0]`, flags);
-        this._material.setParameter(`uTerrainLayersScale[0]`, scales);
-        this._material.setParameter(`uTerrainLayersOffset[0]`, offsets);
+        
+        this._defaultPatchesPreparer.material.setParameter(layersDiffuseParamName, this._layersDiffuse);
+        this._defaultPatchesPreparer.material.setParameter(`${layersFlagsParamName}[0]`, flags);
+        this._defaultPatchesPreparer.material.setParameter(`${layersScaleParamName}[0]`, scales);
+        this._defaultPatchesPreparer.material.setParameter(`${layersOffsetParamName}[0]`, offsets);
     }
 
     private _updateMesh() {
-        this._renderPreparer.patchesStore.customForwardRenderer = this.renderMode === RenderMode.CustomForwardRenderer;
-        this._renderPreparer.patchesStore.setInstancing(
-            this.renderMode === RenderMode.InstancingAccelerator ? new TerrainPathcesInstancing() :
-            this.renderMode === RenderMode.CombineInstancingAccelerator ? new TerrainPathcesCombineInstancing() :
-            undefined
+        this._defaultPatchesPreparer.setInstancingType(
+            this.renderMode === RenderMode.CombineInstancingAccelerator ? 'combine' :
+            this.renderMode === RenderMode.InstancingAccelerator ? 'simple' :
+            false
         );
-        this._renderPreparer.patchesStore.init(this.app, this.entity, this._material);
     }
     
     private _initializeMouse() {
@@ -429,10 +466,12 @@ export class Terrain extends pc.ScriptType {
             }
 
             const data = this.heightMap.file.resource as ArrayBuffer;
-            await this._terrain.loadHeightMapFromFile(data, {
+            const settings: IHeightMapFileImportOptions = {
                 adaptiveMaxHeight: true,
                 adaptiveWidthAndDepth: true,
-            });
+            }
+
+            await this._terrain.loadHeightMapFromFile(data, settings, this.heightMap.smoothFactor, this.heightMap.smoothRadius);
         }
         else {
 
@@ -457,13 +496,10 @@ export class Terrain extends pc.ScriptType {
             resource.destroy();
         }
 
-        this._renderPreparer.patchesStore.updateAabb();
-        this._renderPreparer.patchesStore.updateHeights({
-            minX: 0,
-            minZ: 0,
-            maxX: this.width,
-            maxZ: this.depth
-        });
+        this._heightMapBuffer.updateHeightMap({ minX: 0, maxX: this.width, minZ: 0, maxZ: this.depth });
+        this._spheresBuffer.recalculate();
+        this._meshFactory.updateAabb();
+        this._defaultPatchesPreparer.updateAabb();
     }
 
     private _saveHeightMapToImg() {
@@ -502,10 +538,17 @@ export class Terrain extends pc.ScriptType {
         if (this.autoRender &&
             this.cameraEntity &&
             this.cameraEntity.camera) {
-
+            
             const camera = this.cameraEntity.camera;
             const mat    = this.entity.getWorldTransform();
             const scale  = mat.getScale();
+
+            const cameraPos = this.cameraEntity.getPosition();
+            this._cameraPos[0] = cameraPos.x;
+            this._cameraPos[1] = cameraPos.y;
+            this._cameraPos[2] = cameraPos.z;
+
+            this._defaultPatchesPreparer.material.setParameter(cameraPositionParamName, this._cameraPos);
 
             if (this._lastMouseMoveEvent) {
 
@@ -578,7 +621,8 @@ export class Terrain extends pc.ScriptType {
                             }
 
                             this._terrain.recalculateMinMax(zone);
-                            this._renderPreparer.patchesStore.updateHeights(zone);
+                            this._heightMapBuffer.updateHeightMap(zone);
+                            this._spheresBuffer.recalculateZone(zone);
                             hasChanges = true;
                         }
                     }
@@ -587,16 +631,21 @@ export class Terrain extends pc.ScriptType {
             
             tmpMat.invert(mat);
             tmpMat.transformPoint(camera.entity.getPosition(), this._localCameraPosition);
-            
-            this._frustum.frustum   = camera.frustum;
-            this._frustum.transform = mat;
 
-            this._terrain.updateLods(this._localCameraPosition, this.lodByYPos, true);
-            this._renderPreparer.update(this._frustum);
+            this._patchesManager.updateLods(this._localCameraPosition, this.lodByYPos);
+            this._patchesManager.update(camera.frustum);
+
+            /*
+            const spheres = this._spheresBuffer.spheres;
+            for (let i = 0; i < spheres.length; i++) {
+                const sphere = spheres[i];
+                drawPoint({ center: sphere.center, radius: sphere.radius, numSegments: 10, depthTest: true, color: pc.Color.YELLOW });
+            }
+            */
         }
 
         if (this.app.keyboard?.wasPressed(pc.KEY_L)) {
-            this._terrain.printLodMap();
+            this._defaultPatchesLodState.printLodMap();
         }
 
         if (this.app.keyboard?.wasPressed(pc.KEY_P)) {
@@ -624,11 +673,11 @@ Terrain.attributes.add("castShadow", { type: "boolean", default: true, });
 Terrain.attributes.add("receiveShadow", { type: "boolean", default: true, });
 Terrain.attributes.add("lodByYPos", { type: "boolean", default: true, });
 Terrain.attributes.add("zFar", { type: "number", default: 5000, min: 1, step: 1, precision: 0, });
-Terrain.attributes.add("width", { type: "number", enum: terrainSizeEnum, default: terrainSizeEnumDefault, });
-Terrain.attributes.add("depth", { type: "number", enum: terrainSizeEnum, default: terrainSizeEnumDefault, });
-Terrain.attributes.add("patchSize", { type: "number", enum: terrainPatchSizeEnum, default: terrainPatchSizeEnumDefault, });
+Terrain.attributes.add("width", { type: "number", enum: fieldSizeEnum, default: fieldSizeEnumDefault, });
+Terrain.attributes.add("depth", { type: "number", enum: fieldSizeEnum, default: fieldSizeEnumDefault, });
+Terrain.attributes.add("patchSize", { type: "number", enum: fieldPatchSizeEnum, default: fieldPatchSizeEnumDefault, });
 Terrain.attributes.add("height", { type: "number", default: 10, min: 1, });
-Terrain.attributes.add("compressAlgoritm", { type: "string", enum: terrainHeightsCompressAlgoritm, default: terrainHeightsCompressAlgoritmDefault, });
+Terrain.attributes.add("compressAlgoritm", { type: "string", enum: fieldHeightsCompressAlgoritm, default: fieldHeightsCompressAlgoritmDefault, });
 
 Terrain.attributes.add("layer", { type: "string", default: 'TerrainEditor', });
 Terrain.attributes.add("cameraEntity", { type: "entity" });

@@ -1,9 +1,9 @@
-import { GrassFieldTexture } from "../GrassFieldHelpers/GrassFieldTexture.mjs";
-import { drawPosParamName, getGrassShaderChunks, lod2OffsetXZParamName, offsetAttrName, lod1OffsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName, terrainScaleParamName } from "../GrassFieldHelpers/GrassShaderChunk.mjs";
-import { drawBox } from "../Shared/Debug.mjs";
-import Random from "../Shared/Random.mjs";
-import { getHeightMapFormat } from "../TerrainHelpers/TerrainPatches.mjs";
-import { terrainHeightMapParamName, terrainMaxHeightParamName } from "../TerrainHelpers/TerrainPatchesShaderChunks.mjs";
+import { GrassFieldTexture } from "../GrassField/GrassFieldTexture.mjs";
+import { drawPosParamName, getGrassShaderChunks, lod2OffsetXZParamName, offsetAttrName, lod1OffsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName, fieldScaleParamName } from "../GrassField/GrassShaderChunk.mjs";
+import { drawBox } from "../Extras/Debug.mjs";
+import Random from "../Extras/Random.mjs";
+import { getHeightMapFormat } from "../Heightfield/GPUHeightMapBuffer.mjs";
+import { heightMapParamName, maxHeightParamName } from "../Heightfield/ShaderChunks.mjs";
 import Terrain from "./Terrain.mjs";
 
 export interface IBufferStore {
@@ -153,6 +153,15 @@ export class GrassField extends pc.ScriptType {
         this._cameraEntity = terrainScript.cameraEntity!;
         this._dataTexture  = new GrassFieldTexture(this.app.graphicsDevice, this._terrain.width, this._terrain.depth);
 
+        // update set check is visible
+        if (this._cameraEntity.camera?.frustum.planes &&
+            this._cameraEntity.camera.frustum.planes[0] instanceof pc.Plane) {
+            this._checkIsVisible = this._checkIsVisibleNew as any;
+        }
+        else {
+            this._checkIsVisible = this._checkIsVisibleOld as any;
+        }
+
         this._initBladesAndEditMode();
 
         this.on('enable', () => this._initBladesAndEditMode());
@@ -222,13 +231,53 @@ export class GrassField extends pc.ScriptType {
 
     public updateAabb() {
         
-        const patchesAabb = this._terrain.renderPreparer.patchesStore.aabb;
+        const patchesAabb = this._terrain.aabb;
 
         if (this._meshInst) {
             this._meshInst.mesh.aabb = patchesAabb;
             this._meshInst.aabb = patchesAabb;
             this._meshInst.setCustomAabb(patchesAabb);
         }
+    }
+
+    private _checkIsVisible(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: pcx.Plane[] | number[][]) {
+        return false;
+    }
+
+    private _checkIsVisibleOld(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: number[][]) {
+
+        for (let p = 0; p < 6; p++) {
+            
+            const frustumPlane = frustumPlanes[p];
+            const d = Math.max(min.x * frustumPlane[0], max.x * frustumPlane[0])
+                    + Math.max(min.y * frustumPlane[1], max.y * frustumPlane[1])
+                    + Math.max(min.z * frustumPlane[2], max.z * frustumPlane[2])
+                    + frustumPlane[3];
+
+            if (d <= 0) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private _checkIsVisibleNew(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: pcx.Plane[]) {
+
+        for (let p = 0; p < 6; p++) {
+            
+            const frustumPlane = frustumPlanes[p];
+            const d = Math.max(min.x * frustumPlane.normal.x, max.x * frustumPlane.normal.x)
+                    + Math.max(min.y * frustumPlane.normal.y, max.y * frustumPlane.normal.y)
+                    + Math.max(min.z * frustumPlane.normal.z, max.z * frustumPlane.normal.z)
+                    + frustumPlane.distance;
+
+            if (d <= 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private _frustumHelper(
@@ -247,23 +296,6 @@ export class GrassField extends pc.ScriptType {
         const checkRadius  = this.checkRadius * Math.max(scale.x, scale.z);
         const maxHeight    = this._terrain.object.maxHeight * terrainScale.y;
         const frustumPlanes = camera.frustum.planes;
-        const checkIsVisible = (min: pcx.Vec3, max: pcx.Vec3) => {
-
-            for (let p = 0; p < 6; p++) {
-                
-                const frustumPlane = frustumPlanes[p] as unknown as any[];
-                const d = Math.max(min.x * frustumPlane[0], max.x * frustumPlane[0])
-                        + Math.max(min.y * frustumPlane[1], max.y * frustumPlane[1])
-                        + Math.max(min.z * frustumPlane[2], max.z * frustumPlane[2])
-                        + frustumPlane[3];
-
-                if (d <= 0) {
-                    return false;
-                }
-            }
-
-            return true;
-        }
 
         let visibleCount = 0;
 
@@ -291,7 +323,7 @@ export class GrassField extends pc.ScriptType {
                     worldCenterZ + checkRadius
                 );
 
-                const visible = checkIsVisible(minMaxStore[i][0], minMaxStore[i][1]);
+                const visible = this._checkIsVisible(minMaxStore[i][0], minMaxStore[i][1], frustumPlanes);
 
                 if (visible) {
                     offsetArr[visibleCount * 2 + 0] = localCenterX;
@@ -621,8 +653,7 @@ export class GrassField extends pc.ScriptType {
         */
 
         const terrain   = this._terrain.object;
-        const patches   = this._terrain.renderPreparer.patchesStore;
-        const heightMap = patches.heightMapTexture;
+        const heightMap = this._terrain.heightMapTexture;
         const terrainScale = this._terrain.entity.getScale();
 
         this._material.setAttribute(vindexAttrName, pc.SEMANTIC_POSITION);
@@ -630,9 +661,9 @@ export class GrassField extends pc.ScriptType {
         this._material.setAttribute(shapeAttrName, pc.SEMANTIC_ATTR11);
 
         this._material.setParameter('uDataMap', this._dataTexture.texture);
-        this._material.setParameter(terrainHeightMapParamName, heightMap);
-        this._material.setParameter(terrainScaleParamName, [terrainScale.x, terrainScale.y, terrainScale.z]);
-        this._material.setParameter(terrainMaxHeightParamName, terrain.maxHeight);
+        this._material.setParameter(heightMapParamName, heightMap);
+        this._material.setParameter(fieldScaleParamName, [terrainScale.x, terrainScale.y, terrainScale.z]);
+        this._material.setParameter(maxHeightParamName, terrain.maxHeight);
         this._material.setParameter(`${lod1OffsetXZParamName}[0]`, this._offsetLod1Arr);
         this._material.setParameter(`${lod2OffsetXZParamName}[0]`, this._offsetLod2Arr);
 
@@ -658,24 +689,25 @@ export class GrassField extends pc.ScriptType {
         });
 
         const chunkNames = Object.keys(chunksStore);
+        const shaderChunks = this._material.getShaderChunks?.(pc.SHADERLANGUAGE_GLSL);
 
-        if (pcVersion === 'v1') {
+        if (shaderChunks) {
 
-            const chunks = this._material.chunks as unknown as Record<string, string>;
+            for (let chunkName of chunkNames) {
+                shaderChunks.set(chunkName, chunksStore[chunkName]);
+            }
+
+            this._material.shaderChunksVersion = pc.CHUNKAPI_1_70;
+        }
+        else {
+
+            const chunks: Record<string, string> = this._material.chunks;
 
             chunks.APIVersion = pc.CHUNKAPI_1_70;
 
             for (let chunkName of chunkNames) {
                 chunks[chunkName] = chunksStore[chunkName];
             }
-
-        }
-        else {
-            const shaderChunks = this._material.getShaderChunks(pc.SHADERLANGUAGE_GLSL);
-            for (let chunkName of chunkNames) {
-                shaderChunks.set(chunkName, chunksStore[chunkName]);
-            }
-            this._material.shaderChunksVersion = pc.CHUNKAPI_1_70;
         }
 
         this._material.update();

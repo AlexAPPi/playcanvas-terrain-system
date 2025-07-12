@@ -1,6 +1,6 @@
-import { getOrThrowDataChunkSize } from "../TerrainSystem/AbsPatchedHeightMap.mjs";
-import { TCompressAlgoritm, THeightMapArrayTypeBag } from "../TerrainSystem/CompressedPatchedHeightMap.mjs";
-import { HeightMapArrType } from "../TerrainSystem/HeightMap.mjs";
+import { getOrThrowDataChunkSize } from "../Core/AbsChunkedHeightMap.mjs";
+import { TCompressAlgoritm, THeightMapArrayTypeBag } from "../Core/CompressedPatchedHeightMap.mjs";
+import { HeightMapArrType } from "../Core/HeightMap.mjs";
 
 export type TCompressAlgoritmOrNone = TCompressAlgoritm | 'none';
 export type TTT<T extends TCompressAlgoritmOrNone> =

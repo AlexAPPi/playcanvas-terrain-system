@@ -1,6 +1,6 @@
 {
   "name": "playcanvas-terrain-system",
-  "version": "1.0.1",
+  "version": "0.0.4b",
   "description": "",
   "main": "index.js",
   "type": "module",
@@ -13,7 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@microsoft/signalr": "^7.0.12",
-    "playcanvas": "^2.8.2",
+    "playcanvas": "^2.9.1",
     "playcanvas-sync": "^1.1.1",
     "tsc-watch": "^6.0.4",
     "typescript": "^5.1.6"
