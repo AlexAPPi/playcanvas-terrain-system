@@ -24,9 +24,9 @@ export const fieldPatchSizeEnum = mapEnum({
     '2048':  2049,
 });
 
-export const fieldHeightsCompressAlgoritmDefault = 'none';
-export const fieldHeightsCompressAlgoritm = mapEnum({
-    'None': 'none',
-    'X2': 'x2',
-    'X4': 'x4'
+export const fieldHeightValueTypeDefault = '32f';
+export const fieldHeightValueTypeEnum = mapEnum({
+    '32F': '32f',
+    '16U': '16u',
+    '8U': '8u'
 });

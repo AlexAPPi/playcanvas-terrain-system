@@ -35,10 +35,10 @@ export function addFunction(cb: btInternalTickCallback, v: typeof INTERNAL_TICK_
 
 export function destroy(obj: any): void;
 
-export enum PHY_AlexTerrainCompressType {
-	PHY_ATCT_NONE,
-	PHY_ATCT_X2,
-	PHY_ATCT_X4
+export enum PHY_AlexTerrainValueType {
+	PHY_ATCT_32F,
+	PHY_ATCT_16U,
+	PHY_ATCT_8U
 }
 
 export class btAlexHeightfieldTerrainShape extends btConcaveShape {
@@ -46,7 +46,7 @@ export class btAlexHeightfieldTerrainShape extends btConcaveShape {
 }
 
 export class btAlexTerrainPatchedHeightMap {
-    constructor(width: number, depth: number, patchSize: number, chunkSize: number, minHeight: number, maxHeight: number, compressType: PHY_AlexTerrainCompressType, heightfieldData: unknown);
+    constructor(width: number, depth: number, patchSize: number, chunkSize: number, minHeight: number, maxHeight: number, valueType: PHY_AlexTerrainValueType, heightfieldData: unknown);
 }
 
 export class btIDebugDraw {

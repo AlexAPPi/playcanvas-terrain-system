@@ -1,16 +1,18 @@
-import { getSamplerType, getFieldHeightFactorVS, heightMapFactorsChunks, heightMapSampler, maxHeightParamName } from "../Heightfield/ShaderChunks.mjs";
+import { getSamplerType, heightMapSampler, maxHeightParamName } from "../Heightfield/ShaderChunks.mjs";
 import { THeightMapFormat } from "../Core/AbsHeightMap.mjs";
 
 export const vindexAttrName = "vertex_position";
 export const offsetAttrName = "vertex_offset";
 export const shapeAttrName  = "vertex_shape";
 
-export const timeParamName          = "uTime";
-export const fieldScaleParamName    = "uFieldScale";
-export const lod1OffsetXZParamName  = "uLod1OffsetXZ";
-export const lod2OffsetXZParamName  = "uLod2OffsetXZ";
-export const drawPosParamName       = "uDrawPosition";
-export const windIntensityParamName = "uWindIntensity";
+export const timeParamName            = "uTime";
+export const fieldScaleParamName      = "uFieldScale";
+export const lod1OffsetXZParamName    = "uLod1OffsetXZ";
+export const lod2OffsetXZParamName    = "uLod2OffsetXZ";
+export const drawPosParamName         = "uDrawPosition";
+export const windIntensityParamName   = "uWindIntensity";
+export const circleSmoothingParamName = "uCircleSmoothing";
+export const maxSlopeFactorParamName  = "uMaxSlopeFactor";
 
 export const instancingVS = ``;
 export const transformInstancingVS = ``;
@@ -23,43 +25,45 @@ export const definesVS = /** @type glsl */
     #define HM_CHUNK_SIZE         (%%HM_CHUNK_SIZE%%)
     #define HM_CHUNK_SIZE_F       (float(HM_CHUNK_SIZE))
     #define HM_CHUNK_SIZE_U       (uint(HM_CHUNK_SIZE))
+
     #define FIELD_SIZE            (ivec2(%%FIELD_SIZE_X%%, %%FIELD_SIZE_Z%%))
     #define FIELD_SIZE_F          (vec2(%%FIELD_SIZE_X_F%%, %%FIELD_SIZE_Z_F%%))
     #define FIELD_SIZE_BOUND_F    (FIELD_SIZE_F - 2.0)      
     #define FIELD_SIZE_H_F        (FIELD_SIZE_F / 2.0)
     #define FIELD_SIZE_H_N_F      (-FIELD_SIZE_H_F)
 
-    #define PATCH_SIZE         (%%PATCH_SIZE%%)
-    #define HALF_PATCH_SIZE    (PATCH_SIZE / 2.0)
+    #define GRASS_FIELD_RADIUS      (%%GRASS_FIELD_RADIUS%%)
+    #define GRASS_FIELD_SIZE_F      (GRASS_FIELD_RADIUS * 2.0)
+    #define GRASS_PATCH_SIZE_F      (GRASS_FIELD_RADIUS / 2.5)
+    #define GRASS_HALF_PATCH_SIZE_F (GRASS_FIELD_RADIUS / 5.0)
+    #define GRASS_FIELD_SIZE        (vec2(GRASS_FIELD_SIZE_F))
 
-    #define BLADE_HEIGHT_TALL  (%%BLADE_HEIGHT_TALL%%) // height of a tall blade
-
-    #define TRANSITION_LOW     (%%TRANSITION_LOW%%)   // elevation of beach-grass transition (start)
-    #define TRANSITION_HIGH    (%%TRANSITION_HIGH%%)  // (end)
-    #define TRANSITION_NOISE   (0.06)                 // transition noise scale
-    #define CIRCLE_RADIUS      (PATCH_SIZE * 2.9)
     #define MAX_ZINIT_DISTANCE (300.0)
 `;
 
 export const definesBladeVS = /** @type glsl */
 `
+    #define SIDE_COUNT             (%%SIDE_COUNT%%) // # blade side count [1 or 2]
+
     #define LOD0_BLADE_SEGS        (%%LOD0_BLADE_SEGS%%) // # of blade segments lod 0
     #define LOD1_BLADE_SEGS        (%%LOD1_BLADE_SEGS%%) // # of blade segments lod 1
     #define LOD2_BLADE_SEGS        (%%LOD2_BLADE_SEGS%%) // # of blade segments lod 2
 
     #define LOD0_BLADE_DIVS        (LOD0_BLADE_SEGS + 1.0)  // # of divisions
     #define LOD0_BLADE_VERTS       (LOD0_BLADE_DIVS * 2.0)  // # of vertices (per side, so 1/2 total)
-    #define LOD0_BLADE_VERTS_COUNT (LOD0_BLADE_VERTS * 2.0) // # of vertices
+    #define LOD0_BLADE_VERTS_COUNT (LOD0_BLADE_VERTS * SIDE_COUNT) // # of vertices
 
-    #define LOD1_BLADE_DIVS        (LOD1_BLADE_SEGS + 1.0)  // # of divisions
-    #define LOD1_BLADE_VERTS       (LOD1_BLADE_DIVS * 2.0)  // # of vertices (per side, so 1/2 total)
-    #define LOD1_BLADE_VERTS_COUNT (LOD1_BLADE_VERTS * 2.0) // # of vertices
+    #define LOD1_BLADE_DIVS        (LOD1_BLADE_SEGS > 0.0 ? LOD1_BLADE_SEGS + 1.0 : 0.0) // # of divisions
+    #define LOD1_BLADE_VERTS       (LOD1_BLADE_DIVS * 2.0)                               // # of vertices (per side, so 1/2 total)
+    #define LOD1_BLADE_VERTS_COUNT (LOD1_BLADE_VERTS * SIDE_COUNT)                       // # of vertices
 
-    #define LOD2_BLADE_DIVS        (LOD2_BLADE_SEGS + 1.0)  // # of divisions
-    #define LOD2_BLADE_VERTS       (LOD2_BLADE_DIVS * 2.0)  // # of vertices (per side, so 1/2 total)
-    #define LOD2_BLADE_VERTS_COUNT (LOD2_BLADE_VERTS * 2.0) // # of vertices
+    #define LOD2_BLADE_DIVS        (LOD2_BLADE_SEGS > 0.0 ? LOD2_BLADE_SEGS + 1.0 : 0.0) // # of divisions
+    #define LOD2_BLADE_VERTS       (LOD2_BLADE_DIVS * 2.0)                               // # of vertices (per side, so 1/2 total)
+    #define LOD2_BLADE_VERTS_COUNT (LOD2_BLADE_VERTS * SIDE_COUNT)                       // # of vertices
     
-    #define LOD2_BLADE_VERTS_ALL_COUNT (LOD2_BLADE_VERTS_COUNT * 16.0) // # of vertices all fragments
+    #define LOD2_BLADE_VERTS_ALL_COUNT (LOD2_BLADE_VERTS_COUNT * 16.0) // # of vertices all fragments for LOD2
+
+    #define LOD0_GRASS_PATCH_CENTER_OFFSET   (vec2(GRASS_HALF_PATCH_SIZE_F)) // offset for lod0 patch start
 `;
 
 export const normalCoreVS = /** @type glsl */
@@ -135,14 +139,18 @@ export const baseVS = /** @type glsl */
     uniform mat4 matrix_model;
     uniform mat3 matrix_normal;
 
-    uniform mediump usampler2D uDataMap;
+    uniform highp usampler2D uDataMap;
+    uniform highp sampler2D uComputeHMData;
+    uniform highp sampler2D uComputeNMData;
 
     uniform vec3  ${fieldScaleParamName};
     uniform float ${maxHeightParamName};
-    
+
     uniform vec3  ${drawPosParamName};       // centre of where we want to draw
     uniform float ${timeParamName};          // used to animate blades
     uniform float ${windIntensityParamName};
+    uniform float ${circleSmoothingParamName};
+    uniform float ${maxSlopeFactorParamName};
 
     uniform vec2 ${lod1OffsetXZParamName}[8];  // center offset from draw pos lod 1
     uniform vec2 ${lod2OffsetXZParamName}[16]; // center offset from draw pos lod 2
@@ -157,9 +165,11 @@ export const baseVS = /** @type glsl */
     float dSideOfBlade;           // front/back side of blade
     float dEdgeOfBlade;           // left/right edge (x=0 or x=1)
     vec2 dBladeFieldXZPos;        // blade xz position on field
-    vec3 dVertexPosition;         // Vertex position - start with 2D shape, no bend applied
-    vec3 dVertexNormal;           // Vertex normal
-    vec2 dFieldPatchOffsetXZ;     // field patch offset from center
+    vec3 dVertexPosition;         // vertex position - start with 2D shape, no bend applied
+    vec3 dVertexNormal;           // vertex normal
+    vec2 dGrassPatchOffsetXZ;     // grass patch center
+    vec3 dFieldSurfaceNormal;     // field surface normal
+    float dFieldSurfaceAltitude;  // field surface altitude
 `;
 
 export const baseClearSubVS = /** @type glsl */
@@ -169,64 +179,11 @@ export const baseClearSubVS = /** @type glsl */
     mat3 dNormalMatrix;
 `;
 
-export const fieldHeightMapVS = 
-`
-    uvec2 clampFieldXZ(vec2 xz) {
-        return uvec2(clamp(xz, vec2(0.0), FIELD_SIZE_F));
-    }
-
-    uvec3 getFieldChunkBufferCoord(vec2 origXZ) {
-
-        uvec2 xz = clampFieldXZ(origXZ);
-        uvec2 ck = xz / HM_CHUNK_SIZE_U;
-
-        uint localX = xz[0] % HM_CHUNK_SIZE_U;
-        uint localZ = xz[1] % HM_CHUNK_SIZE_U;
-        uint level  = ck[1] * HM_NUM_CHUNKS_X_U + ck[0];
-
-        return uvec3(localX, localZ, level);
-    }
-    
-    float getFieldHeightFactor(vec2 xz) {
-        uvec3 coord = getFieldChunkBufferCoord(xz);
-        return getFieldHeightFactorFromTexture(coord);
-    }
-
-    float getFieldHeight(vec2 xz) {
-        return getFieldHeightFactor(xz) * ${maxHeightParamName};
-    }
-    
-    float getFieldHeightInterpolated(vec2 xz) {
-
-        // here we can calculate normal
-
-        vec2 floorXZ = floor(xz);
-
-        float x0z0 = getFieldHeight(floorXZ);
-
-        if ((floorXZ[0] + 1.0 >= FIELD_SIZE_F[0]) ||
-            (floorXZ[1] + 1.0 >= FIELD_SIZE_F[1])) {
-            return x0z0;
-        }
-
-        float x1z0 = getFieldHeight(floorXZ + vec2(1.0, 0.0));
-        float x0z1 = getFieldHeight(floorXZ + vec2(0.0, 1.0));
-        float x1z1 = getFieldHeight(floorXZ + vec2(1.0, 1.0));
-
-        float factorX = xz[0] - floorXZ[0];
-        float factorZ = xz[1] - floorXZ[1];
-
-        float interpolatedBottom = (x1z0 - x0z0) * factorX + x0z0;
-        float interpolatedTop    = (x1z1 - x0z1) * factorX + x0z1;
-        float finalHeight        = (interpolatedTop - interpolatedBottom) * factorZ + interpolatedBottom;
-
-        return finalHeight;
-    }
-`;
-
 export const bladeDecoderVS = /** @type glsl */
 `
     void decodeBlade() {
+
+#if defined(USE_LOD2)
 
         float nnVi = ${vindexAttrName} - LOD2_BLADE_VERTS_ALL_COUNT;
 
@@ -240,31 +197,51 @@ export const bladeDecoderVS = /** @type glsl */
             dPercentOfBladeHeight = dDivVertexIndex / LOD2_BLADE_SEGS;
             dSideOfBlade          = floor(lod2nVi / LOD2_BLADE_VERTS);
 
-            dFieldPatchOffsetXZ = ${lod2OffsetXZParamName}[patchIndex];
-        }
-        else if (nnVi < LOD0_BLADE_VERTS_COUNT) {
-
-            dVertexIndex          = mod(nnVi, LOD0_BLADE_VERTS);
-            dDivVertexIndex       = floor(dVertexIndex / 2.0);
-            dPercentOfBladeHeight = dDivVertexIndex / LOD0_BLADE_SEGS;
-            dSideOfBlade          = floor(nnVi / LOD0_BLADE_VERTS);
-
-            dFieldPatchOffsetXZ = vec2(0.0);
+            dGrassPatchOffsetXZ = ${lod2OffsetXZParamName}[patchIndex];
         }
         else {
+#else
 
-            float lod1nnVi = nnVi - LOD0_BLADE_VERTS_COUNT;
-            float lod1nVi  = mod(lod1nnVi, LOD1_BLADE_VERTS_COUNT);
-            int patchIndex = int(lod1nnVi / LOD1_BLADE_VERTS_COUNT);
+        float nnVi = ${vindexAttrName};
 
-            dVertexIndex          = mod(lod1nVi, LOD1_BLADE_VERTS);
-            dDivVertexIndex       = floor(dVertexIndex / 2.0);
-            dPercentOfBladeHeight = dDivVertexIndex / LOD1_BLADE_SEGS;
-            dSideOfBlade          = floor(lod1nVi / LOD1_BLADE_VERTS);
+#endif
 
-            dFieldPatchOffsetXZ = ${lod1OffsetXZParamName}[patchIndex];
+#if defined(USE_LOD1)
+
+            if (nnVi < LOD0_BLADE_VERTS_COUNT) {
+
+#endif
+                dVertexIndex          = mod(nnVi, LOD0_BLADE_VERTS);
+                dDivVertexIndex       = floor(dVertexIndex / 2.0);
+                dPercentOfBladeHeight = dDivVertexIndex / LOD0_BLADE_SEGS;
+                dSideOfBlade          = floor(nnVi / LOD0_BLADE_VERTS);
+
+                dGrassPatchOffsetXZ = LOD0_GRASS_PATCH_CENTER_OFFSET;
+
+#if defined(USE_LOD1)
+
+            }
+            else {
+            
+                float lod1nnVi = nnVi - LOD0_BLADE_VERTS_COUNT;
+                float lod1nVi  = mod(lod1nnVi, LOD1_BLADE_VERTS_COUNT);
+                int patchIndex = int(lod1nnVi / LOD1_BLADE_VERTS_COUNT);
+
+                dVertexIndex          = mod(lod1nVi, LOD1_BLADE_VERTS);
+                dDivVertexIndex       = floor(dVertexIndex / 2.0);
+                dPercentOfBladeHeight = dDivVertexIndex / LOD1_BLADE_SEGS;
+                dSideOfBlade          = floor(lod1nVi / LOD1_BLADE_VERTS);
+
+                dGrassPatchOffsetXZ = ${lod1OffsetXZParamName}[patchIndex];
+            }
+#endif
+
+#if defined(USE_LOD2)
+
         }
-        
+
+#endif
+
         dEdgeOfBlade = mod(dVertexIndex, 2.0);
     }
 `;
@@ -282,47 +259,99 @@ export const calculateLocalVS =  /** @type glsl */
     vec2 rotate(float x, float y, vec2 r) {
         return vec2(x * r.x - y * r.y, x * r.y + y * r.x);
     }
-
-    float getGrassFactor(vec2 oxz) {
     
-        vec2 xz = floor(oxz);
+    mat3 getSurfaceRotationMatrix(vec3 surfaceNormal) {
 
-        if (xz[0] < 0.0 ||
-            xz[1] < 0.0 ||
-            xz[0] > FIELD_SIZE_BOUND_F[0] ||
-            xz[1] > FIELD_SIZE_BOUND_F[1]) {
-            return 0.0;
+        vec3 initialNormal = vec3(0.0, 1.0, 0.0);
+        vec3 targetNormal = normalize(surfaceNormal);
+
+        float dotProd = dot(initialNormal, targetNormal);
+        
+        // we do not consider negative parallel normal (if dotProd < -0.9999)
+        if (dotProd > 0.9999) {
+            return mat3(1.0);
         }
 
-        return 1.0;
+        vec3 axis = normalize(cross(initialNormal, targetNormal));
+        float angle = acos(dotProd);
+        
+        float s = sin(angle);
+        float c = cos(angle);
+        float t = 1.0 - c;
+
+        return mat3(
+            t * axis.x * axis.x + c,
+            t * axis.x * axis.y - s * axis.z,
+            t * axis.x * axis.z + s * axis.y,
+            
+            t * axis.x * axis.y + s * axis.z,
+            t * axis.y * axis.y + c,
+            t * axis.y * axis.z - s * axis.x,
+            
+            t * axis.x * axis.z - s * axis.y,
+            t * axis.y * axis.z + s * axis.x,
+            t * axis.z * axis.z + c
+        );
+    }
+
+    float getGrassFactor(vec2 xz, vec3 surfaceNormal) {
+        return (all(greaterThanEqual(xz, vec2(0.0))) &&
+                all(lessThanEqual(xz, FIELD_SIZE_BOUND_F)) &&
+                surfaceNormal.y >= ${maxSlopeFactorParamName})
+                ? surfaceNormal.y : 0.0;
     }
     
+    float unpackFactorFromRGBA(vec4 rgba) {
+        // TODO: optimization
+        const vec4 bitShifts = vec4(1.0, 1.0 / (255.0), 1.0 / (255.0 * 255.0), 1.0 / (255.0 * 255.0 * 255.0)); 
+        return dot(rgba, bitShifts);
+    }
+
     varying vec2 vUvFieldCoord;
     varying vec2 vUvCoord;
     varying vec3 vColor;
 
     void calculateBladeVertex() {
-        
+
         vec4 offset = ${offsetAttrName};
         vec4 shape  = ${shapeAttrName};
 
+        // vec4 offset = vec4(${offsetAttrName}.xyz, 0.0);
+        // vec4 shape = vec4(0.05, 1.5, 0.0, 0.0);
+
         // Based on centre of view cone position, what grid tile should
         // this piece of grass be drawn at?
-        vec2 quadCenterPos = ${drawPosParamName}.xz;
-        vec2 bladeOffset   = offset.xy;
-        vec2 patchCenter   = floor((quadCenterPos - bladeOffset) / PATCH_SIZE) * PATCH_SIZE + HALF_PATCH_SIZE + dFieldPatchOffsetXZ;
+        vec2 viewerPos   = ${drawPosParamName}.xz;
+        vec2 bladeOffset = offset.xy;
 
-        float drawPosAltitude = ${drawPosParamName}.y;
+        // Find the virtual patch center
+        vec2 virtualPatchCenter = floor((viewerPos - bladeOffset) / GRASS_PATCH_SIZE_F) * GRASS_PATCH_SIZE_F + dGrassPatchOffsetXZ;
 
         // Find the blade mesh x,y position
-        vec2 bladePos = patchCenter + bladeOffset;
+        vec2 bladePos = virtualPatchCenter + bladeOffset;
 
-        // Local quad center position in field
+        // Local blade position in field
         // because the positions are shifted by half the size of the field
-        // vec2 localQuadCenterPos = quadCenterPos + FIELD_SIZE_H_F;
+        dBladeFieldXZPos = bladePos / ${fieldScaleParamName}.xz + FIELD_SIZE_H_F;
 
-        float distanceFromBladeToQuadCenter = distance(bladePos, quadCenterPos);
-        float degenerateByDistanceFromBladeToQuadCenter = smoothstep(0.92, 1.0, CIRCLE_RADIUS / distanceFromBladeToQuadCenter);
+        // Find the blade pos in compute data
+        vec2 grassFieldBladePos = bladePos / ${fieldScaleParamName}.xz - floor(viewerPos / ${fieldScaleParamName}.xz) + GRASS_FIELD_RADIUS;
+        vec2 grassFieldBladeClampPos = clamp(grassFieldBladePos, vec2(0.0), GRASS_FIELD_SIZE);
+
+        vec2 grassFieldBladeUV = grassFieldBladeClampPos / GRASS_FIELD_SIZE_F;
+        vec4 bladeComputeHMData = texture2D(uComputeHMData, grassFieldBladeUV);
+        vec4 bladeComputeNMData = texture2D(uComputeNMData, grassFieldBladeUV);
+
+        dFieldSurfaceAltitude = unpackFactorFromRGBA(bladeComputeHMData.rgba) * ${maxHeightParamName};
+        dFieldSurfaceNormal = bladeComputeNMData.rgb;
+
+        dFieldSurfaceAltitude *= ${fieldScaleParamName}.y;
+
+        // Sample the heightfield data texture to get altitude for this blade position
+        float grassFactor = getGrassFactor(dBladeFieldXZPos, dFieldSurfaceNormal);
+
+        float distanceFromBladeToQuadCenter = distance(bladePos, viewerPos);
+        float degenerateByDistanceFromBladeToQuadCenter = smoothstep(0.92, 1.0, GRASS_PATCH_SIZE_F * ${circleSmoothingParamName} / distanceFromBladeToQuadCenter);
 
         // Vertex position - start with 2D shape, no bend applied
         dVertexPosition = vec3(
@@ -331,12 +360,13 @@ export const calculateLocalVS =  /** @type glsl */
             shape.y * dPercentOfBladeHeight // height of vtx, unbent
         );
 
-        // Apply blade's natural curve amount
-        float curve = shape.w;
+        // Start computing a normal for this vertex
+        dVertexNormal = vec3(0.0, dSideOfBlade * -2.0 + 1.0, 0.0);
 
+        // Apply blade's natural curve amount
         // Then add animated curve amount by time using this blade's
         // unique properties to randomize its oscillation
-        curve += shape.w + 0.125 * (sin(${timeParamName} * 4.0 + offset.w * 0.2 * shape.y + offset.x + offset.y));
+        float curve = shape.w * 2.0 + 0.125 * sin(${timeParamName} * 4.0 + offset.w * 0.2 * shape.y + offset.x + offset.y);
 
         // TODO
         float wind = 0.5;
@@ -345,9 +375,6 @@ export const calculateLocalVS =  /** @type glsl */
         wind = wind * wind * ${windIntensityParamName};
         wind *= dPercentOfBladeHeight; // scale wind by height of blade
         wind = -wind;
-
-        // Start computing a normal for this vertex
-        dVertexNormal = vec3(0.0, dSideOfBlade * -2.0 + 1.0, 0.0);
 
         // put lean and curve together
         float rot = shape.z + curve * dPercentOfBladeHeight;
@@ -362,39 +389,35 @@ export const calculateLocalVS =  /** @type glsl */
         dVertexPosition.xy = rotate(dVertexPosition.x, dVertexPosition.y, rotv);
         dVertexNormal.xy   = rotate(dVertexNormal.x, dVertexNormal.y, rotv);
 
+        // wind blows in axis-aligned direction to make things simpler
         rotv = vec2(cos(wind), sin(wind));
-
-        // Wind blows in axis-aligned direction to make things simpler
+        
         dVertexPosition.yz = rotate(dVertexPosition.y, dVertexPosition.z, rotv);
         dVertexNormal.yz   = rotate(dVertexNormal.y, dVertexNormal.z, rotv);
 
-        // Local blade position in field
-        // because the positions are shifted by half the size of the field
-        dBladeFieldXZPos = bladePos / ${fieldScaleParamName}.xz + FIELD_SIZE_H_F;
-        
-        // Sample the heightfield data texture to get altitude for this blade position
-        float bladeAltitude = getFieldHeightInterpolated(dBladeFieldXZPos) * ${fieldScaleParamName}.y;
-        float grassFactor   = getGrassFactor(dBladeFieldXZPos);
+        // rotation of surface normal
+        mat3 surfaceRotationMat = getSurfaceRotationMatrix(dFieldSurfaceNormal);
+        dVertexPosition = surfaceRotationMat * dVertexPosition;
+        dVertexNormal   = surfaceRotationMat * dVertexNormal;
 
-        float distanceQuadCenterToDraw = distance(bladeAltitude, drawPosAltitude);
+        float drawPosAltitude = ${drawPosParamName}.y;
+        float distanceQuadCenterToDraw = distance(dFieldSurfaceAltitude, drawPosAltitude);
         float degenerateByDistanceFromBladeToDraw = smoothstep(0.81, 1.0, MAX_ZINIT_DISTANCE / distanceQuadCenterToDraw);
 
-        // Determine if we want the grass to appear or not
-        // Use the noise channel to perturb the blade altitude grass starts growing at.
-        // float noisyAltitude = grassFactor * TRANSITION_NOISE - (TRANSITION_NOISE / 2.0);
-        // float degenerateByNoise = (clamp(noisyAltitude, TRANSITION_LOW, TRANSITION_HIGH) - TRANSITION_LOW) * (1.0 / (TRANSITION_HIGH - TRANSITION_LOW));
-
         // Transition geometry toward degenerate as we approach field altitude
-        dVertexPosition *= grassFactor * degenerateByDistanceFromBladeToDraw * degenerateByDistanceFromBladeToQuadCenter; // degenerateByNoise
+        float degenerateFactor = grassFactor * degenerateByDistanceFromBladeToDraw * degenerateByDistanceFromBladeToQuadCenter;
+
+        dVertexPosition *= degenerateFactor;
+        dVertexNormal *= degenerateFactor;
 
         // Translate to world coordinates
         dVertexPosition.x += bladePos.x;
         dVertexPosition.y += bladePos.y;
-        dVertexPosition.z += bladeAltitude;
+        dVertexPosition.z += dFieldSurfaceAltitude;
         
         // Translate to xz plane
         dVertexPosition = dVertexPosition.xzy;
-        dVertexNormal   = dVertexNormal.xzy;
+        dVertexNormal   = normalize(dVertexNormal.xzy);
 
         // grass texture coordinate for this vertex
         vUvCoord = vec2(dEdgeOfBlade, dDivVertexIndex * 2.0);
@@ -454,16 +477,12 @@ export const diffusePS = /** @type glsl */
 
 export const chunks = {
 
-    ...heightMapFactorsChunks,
-
     heightMapSampler,
 
     definesVS,
     definesBladeVS,
     bladeDecoderVS,
     calculateLocalVS,
-
-    fieldHeightMapVS,
 
     // Vertex
     baseVS,
@@ -486,13 +505,11 @@ export interface IGrassShaderOptions {
     depth: number,
     heightMapChunkSize: number,
     heightMapFormat: THeightMapFormat,
-    bladeMaxHeight: number,
     lod0BladeSegs: number,
     lod1BladeSegs: number,
     lod2BladeSegs: number,
+    sideCount: number,
     radius: number,
-    transitionLow: number,
-    transitionHigh: number,
     chunksStore?: typeof chunks,
     engineVersion?: 'v1' | 'v2'
 }
@@ -502,13 +519,11 @@ export function getGrassShaderChunks({
     depth,
     heightMapChunkSize,
     heightMapFormat,
-    bladeMaxHeight,
     lod0BladeSegs,
     lod1BladeSegs,
     lod2BladeSegs,
+    sideCount,
     radius,
-    transitionLow,
-    transitionHigh,
     chunksStore = chunks,
     engineVersion = 'v1',
 }: IGrassShaderOptions): Record<string, string> {
@@ -520,23 +535,20 @@ export function getGrassShaderChunks({
         .replace('%%FIELD_SIZE_Z%%', String(depth))
         .replace('%%FIELD_SIZE_X_F%%', width.toFixed(1))
         .replace('%%FIELD_SIZE_Z_F%%', depth.toFixed(1))
-        .replace('%%BLADE_HEIGHT_TALL%%', bladeMaxHeight.toFixed(1))
-        .replace('%%PATCH_SIZE%%', radius.toFixed(1))
-        .replace('%%TRANSITION_LOW%%', transitionLow.toString())
-        .replace('%%TRANSITION_HIGH%%', transitionHigh.toString());
+        .replace('%%GRASS_FIELD_RADIUS%%', radius.toFixed(1));
     
     const definesBladeVS = chunksStore.definesBladeVS
+        .replace('%%SIDE_COUNT%%', sideCount.toFixed(1))
         .replace('%%LOD0_BLADE_SEGS%%', lod0BladeSegs.toFixed(1))
         .replace('%%LOD1_BLADE_SEGS%%', lod1BladeSegs.toFixed(1))
-        .replace('%%LOD2_BLADE_SEGS%%', lod2BladeSegs.toFixed(1));
+        .replace('%%LOD2_BLADE_SEGS%%', lod2BladeSegs.toFixed(1))
+        + (lod1BladeSegs > 0 ? '\r\n#define USE_LOD1\r\n' : '')
+        + (lod2BladeSegs > 0 ? '\r\n#define USE_LOD2\r\n' : '');
 
     const heightMapVS = chunksStore.heightMapSampler.replaceAll('%%HEIGHT_MAP_SAMPLER%%', getSamplerType(heightMapFormat));
     const baseClearVS = chunksStore.baseVS + heightMapVS;
-    const heightFactorVS = getFieldHeightFactorVS(heightMapFormat, chunksStore);
-
-    const transformVS = heightFactorVS
-                      + chunksStore.fieldHeightMapVS
-                      + chunksStore.bladeDecoderVS
+    
+    const transformVS = chunksStore.bladeDecoderVS
                       + chunksStore.calculateLocalVS
                       + chunksStore.transformVS;
 

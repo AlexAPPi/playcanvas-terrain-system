@@ -2,7 +2,7 @@ import type { float, int } from "../Extras/Types.mjs";
 import type { IReadonlyAbsShatteredHeightMap } from "./AbsShatteredHeightMap.mjs";
 import type { IZone } from "./IZone.mjs";
 
-export const bufferItemSize = 4; // (x, y, z, radius)
+export const bufferItemSize = 5; // (x, y, z, radiusWithMargin, originalRadius)
 
 // Our system is divided into a general part and an engine part,
 // for optimization we use the engine part in this file. (playcanvas Vec3, Mat4, BoundingSphere)
@@ -12,16 +12,19 @@ export default class PatchesSphereBuffer {
     private _scale: pcx.Vec3;
     private _matrix: pcx.Mat4;
     private _heightMap: IReadonlyAbsShatteredHeightMap;
-    private _localBuffer: number[];
+    private _margins: float[];
+    private _localBuffer: float[];
     private _worldSpheres: pcx.BoundingSphere[];
 
     public get heightMap() { return this._heightMap; }
     public get buffer() { return this._localBuffer; }
     public get spheres() { return this._worldSpheres; }
+    public get margins() { return this._margins; }
 
     constructor(heightMap: IReadonlyAbsShatteredHeightMap, matrix?: pcx.Mat4) {
         this._heightMap = heightMap;
-        this._localBuffer = new Array<number>(this._heightMap.numPatchesX * this._heightMap.numPatchesZ * bufferItemSize);
+        this._localBuffer = new Array<float>(this._heightMap.numPatchesX * this._heightMap.numPatchesZ * bufferItemSize);
+        this._margins = new Array<float>(this._heightMap.numPatchesX * this._heightMap.numPatchesZ);
         this._localBuffer.fill(0);
         this._scale = new pc.Vec3();
         this._matrix = new pc.Mat4();
@@ -41,6 +44,17 @@ export default class PatchesSphereBuffer {
 
                 this._worldSpheres[index] = new pc.BoundingSphere(); 
             }
+        }
+    }
+
+    public setPatchMargin(patchX: int, patchZ: int, margin: float, recalculate: boolean = true) {
+
+        const sphereIdx = patchX + patchZ * this._heightMap.numPatchesX;
+
+        this._margins[sphereIdx] = margin;
+    
+        if (recalculate) {
+            this.recalculateBoundingSphere(patchX, patchZ);
         }
     }
 
@@ -104,26 +118,30 @@ export default class PatchesSphereBuffer {
 
     public recalculateBoundingSphere(patchX: int, patchZ: int) {
 
-        const index = (patchX + patchZ * this._heightMap.numPatchesX) * bufferItemSize;
+        const sphereIdx = patchX + patchZ * this._heightMap.numPatchesX;
+        const bufferIndex = sphereIdx * bufferItemSize;
 
-        const patchMinHeight = this._heightMap.getPatchMin(patchX, patchZ);
-        const patchMaxHeight = this._heightMap.getPatchMax(patchX, patchZ);
+        const patchMinHeight = this._heightMap.getPerformPatchMin(patchX, patchZ);
+        const patchMaxHeight = this._heightMap.getPerformPatchMax(patchX, patchZ);
         
-        const patchRadiusBySize   = this._heightMap.patchSize / 2;
+        const square = this._heightMap.patchSize - 1;
+        const patchRadiusBySize   = square / 2;
         const patchRediusByHeight = (patchMaxHeight - patchMinHeight) / 2;
 
-        const patchCenterX = (patchX * this._heightMap.patchSize) + patchRadiusBySize;
+        const patchCenterX = (patchX * square) + patchRadiusBySize;
         const patchCenterY = (patchMaxHeight + patchMinHeight) / 2;
-        const patchCenterZ = (patchZ * this._heightMap.patchSize) + patchRadiusBySize;
+        const patchCenterZ = (patchZ * square) + patchRadiusBySize;
         const radius       = (patchRadiusBySize > patchRediusByHeight ? patchRadiusBySize : patchRediusByHeight) * Math.SQRT2;
+        const margin       = this._margins[sphereIdx] || 1;
 
         // We construct coordinates relative to the center of the height map
 
-        this._localBuffer[index + 0] = patchCenterX + this._heightMap.width / -2;
-        this._localBuffer[index + 1] = patchCenterY;
-        this._localBuffer[index + 2] = patchCenterZ + this._heightMap.depth / -2;
-        this._localBuffer[index + 3] = radius;
-        
+        this._localBuffer[bufferIndex + 0] = patchCenterX + this._heightMap.width / -2;
+        this._localBuffer[bufferIndex + 1] = patchCenterY;
+        this._localBuffer[bufferIndex + 2] = patchCenterZ + this._heightMap.depth / -2;
+        this._localBuffer[bufferIndex + 3] = radius * margin;
+        this._localBuffer[bufferIndex + 4] = radius;
+
         this._recalculateWorldBoundingSphere(patchX, patchZ);
     }
 
@@ -142,7 +160,7 @@ export default class PatchesSphereBuffer {
 
         const sphereIdx = patchX + patchZ * this._heightMap.numPatchesX;
         const bufferIdx = sphereIdx * bufferItemSize;
-        const locRadius = this._localBuffer[bufferIdx + 3];
+        const locRadius = this._localBuffer[bufferIdx + 3]; // take radius with custom margin
         const wrlSphere = this._worldSpheres[sphereIdx];
 
         wrlSphere.center.set(
@@ -151,11 +169,8 @@ export default class PatchesSphereBuffer {
             this._localBuffer[bufferIdx + 2]
         );
 
-        wrlSphere.radius = Math.sqrt(
-            (this._scale.x * locRadius) ** 2 +
-            (this._scale.y * locRadius) ** 2 +
-            (this._scale.z * locRadius) ** 2
-        );
+        // TODO: need more test
+        wrlSphere.radius = locRadius * Math.sqrt((this._scale.x ** 2 + this._scale.y ** 2 + this._scale.z ** 2) / 3);
 
         this._matrix.transformPoint(wrlSphere.center, wrlSphere.center);
     }

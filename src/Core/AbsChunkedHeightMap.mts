@@ -41,10 +41,11 @@ export function getOrThrowDataChunkSize(patchSize: int, dataChunkSize: int) {
 export abstract class AbsChunkedHeightMap<TData extends Float32Array | Uint16Array | Uint8Array = HeightMapArrType> extends AbsShatteredHeightMap<TData> implements IReadonlyAbsChunkedHeightMapTypped<TData> {
 
     protected _patchesSegmentSize: int;
-    protected _minMaxHeightCoords: int[];
+    protected _minMaxPatchesCoords: int[];
     protected _minHeightCoord: int[];
     protected _maxHeightCoord: int[];
     protected _dataChunkSize: int;
+    protected _dataChunkSizeP2: int;
     protected _dataNumChunksX: int;
     protected _dataNumChunksZ: int;
     protected _dataChunkSizeFactor: float;
@@ -63,6 +64,7 @@ export abstract class AbsChunkedHeightMap<TData extends Float32Array | Uint16Arr
 
     protected _setDataChunkSize(value: int) {
         this._dataChunkSize  = getOrThrowDataChunkSize(this._patchSize, value);
+        this._dataChunkSizeP2 = this.dataChunkSize ** 2;
         this._dataNumChunksX = ((this.width - 1) / (this._dataChunkSize - 1)) | 0;
         this._dataNumChunksZ = ((this.depth - 1) / (this._dataChunkSize - 1)) | 0;
         this._dataChunkSizeFactor = this._patchSize === this._dataChunkSize
@@ -77,7 +79,7 @@ export abstract class AbsChunkedHeightMap<TData extends Float32Array | Uint16Arr
         const chunkX = x / this._dataChunkSize | 0;
         const chunkZ = z / this._dataChunkSize | 0;
 
-        const chunkOffset = (chunkZ * this._dataNumChunksX + chunkX) * (this._dataChunkSize ** 2);
+        const chunkOffset = (chunkZ * this._dataNumChunksX + chunkX) * this._dataChunkSizeP2;
         const localIndex  = (localZ * this._dataChunkSize + localX);
 
         return chunkOffset + localIndex;
@@ -91,10 +93,9 @@ export abstract class AbsChunkedHeightMap<TData extends Float32Array | Uint16Arr
     public getChunkBuffer(type: Uint16ArrayConstructor, chunkX: int, chunkZ: int): Uint16Array;
     public getChunkBuffer(type: Uint8ArrayConstructor, chunkX: int, chunkZ: int): Uint8Array;
     public getChunkBuffer(type: any, chunkX: int, chunkZ: int) {
-        const size        = this.dataChunkSize ** 2;
-        const chunkLevel  = chunkZ * this.dataNumChunksX + chunkX;
-        const chunkOffset = chunkLevel * size * this.data.BYTES_PER_ELEMENT;
-        const count       = size * (this.data.BYTES_PER_ELEMENT / type.BYTES_PER_ELEMENT);
+        const chunkIndex  = this.getChunkIndex(chunkX, chunkZ);
+        const chunkOffset = this._dataChunkSizeP2 * chunkIndex * this.data.BYTES_PER_ELEMENT;
+        const count       = this._dataChunkSizeP2 * (this.data.BYTES_PER_ELEMENT / type.BYTES_PER_ELEMENT);
         return new type(this.data.buffer, this.data.byteOffset + chunkOffset, count);
     }
 
@@ -109,7 +110,7 @@ export abstract class AbsChunkedHeightMap<TData extends Float32Array | Uint16Arr
 
             for (let chunkX = 0; chunkX < this._dataNumChunksX; chunkX++) {
                 
-                const index = chunkZ * this._dataNumChunksX + chunkX;
+                const index = this.getChunkIndex(chunkX, chunkZ);
                 result[index] = this.getChunkBuffer(type, chunkX, chunkZ);
             }
         }

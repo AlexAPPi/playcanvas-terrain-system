@@ -31,7 +31,7 @@ export interface IPatchInstancing<TData extends Uint16Array | Uint8Array> extend
     
     appendMeshInstances(arr: pcx.MeshInstance[], offset?: number): number;
 
-    begin(castShadow?: boolean, receiveShadow?: boolean): void;
+    begin(castShadow?: boolean): void;
 
     end(): void;
 }

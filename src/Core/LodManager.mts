@@ -53,19 +53,21 @@ export default class LodManager {
     }
 
     protected _updateLodMapPass1(localViewPos: RefObject<IVector3>, heightMap: IReadonlyAbsHeightMap, useYPos: boolean) {
-        
-        const halfWidth   = heightMap.width / 2;
-        const halfDepth   = heightMap.depth / 2;
-        const centerStep  = this.patchSize / 2 | 0;
+
+        const widthM1     = heightMap.width - 1;
+        const depthM1     = heightMap.depth - 1;
         const patchSizeM1 = this.patchSize - 1;
+        const halfWidth   = widthM1 / 2;
+        const halfDepth   = depthM1 / 2;
+        const centerStep  = this.patchSize / 2 | 0;
 
         let proxyPatchCenterY = 0;
         let hasChange = false;
 
         if (useYPos) {
 
-            const normalizeCameraX = Math.min(Math.max(localViewPos.x + halfWidth, 0), heightMap.width - 1);
-            const normalizeCameraZ = Math.min(Math.max(localViewPos.z + halfDepth, 0), heightMap.depth - 1);
+            const normalizeCameraX = Math.min(Math.max(localViewPos.x + halfWidth, 0), widthM1);
+            const normalizeCameraZ = Math.min(Math.max(localViewPos.z + halfDepth, 0), depthM1);
             const cameraPosAltitude = heightMap.get(normalizeCameraX | 0, normalizeCameraZ | 0);
 
             proxyPatchCenterY = (localViewPos.y - cameraPosAltitude) ** 2;

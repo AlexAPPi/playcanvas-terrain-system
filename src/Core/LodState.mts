@@ -60,6 +60,11 @@ export default class LodState implements ILodState {
         this._map.initByVal(this._lodManager.numPatchesX, this._lodManager.numPatchesZ, getZeroPatchLod);
     }
 
+    public destroy() {
+        this._lodManager?.removeState(this);
+        this._lodManager = null!;
+    }
+
     public setZFar(zFar: float) {
         this._zFar = zFar;
         this._calcLodRegions();

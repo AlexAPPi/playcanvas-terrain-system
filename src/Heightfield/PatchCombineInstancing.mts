@@ -28,7 +28,7 @@ export default class PatchCombineInstancing extends PatchCombineInstancingNative
         return meshIndex;
     }
 
-    public begin(castShadow: boolean = false, receiveShadow: boolean = false) {
+    public begin(castShadow: boolean = false) {
 
         for (let c = 0; c < this.data.length; c++) {
 
@@ -43,7 +43,6 @@ export default class PatchCombineInstancing extends PatchCombineInstancingNative
                 if (chunkObject) {
                     chunkObject.visible = false;
                     chunkObject.castShadow = castShadow;
-                    chunkObject.receiveShadow = receiveShadow;
                 }
             }
         }

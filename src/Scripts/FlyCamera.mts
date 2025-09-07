@@ -35,6 +35,8 @@ export class FlyCamera extends pc.ScriptType {
             this.app.mouse.on(pc.EVENT_MOUSEDOWN, this.onMouseDown, this);
             this.app.mouse.on(pc.EVENT_MOUSEUP,   this.onMouseUp, this);
         }
+
+        //this.entity.camera!.setShaderPass(pc.SHADERPASS_WORLDNORMAL);
     }
 
     public append(x: number, y: number) {

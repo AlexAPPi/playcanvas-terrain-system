@@ -7,8 +7,8 @@ export const vertexNormalAttrName  = "vertex_normal";
 
 export const patchInstCoordOffsetAttrName = "vertex_postion_offset";
 
-export const patchCoordOffsetParamName     = "uPatchCoordOffset";
-export const patchLodCoreParamName         = "uPatchLodCore";
+export const patchCoordOffsetParamName = "uPatchCoordOffset";
+export const patchLodCoreParamName     = "uPatchLodCore";
 
 export const heightMapParamName = "uHeightMap";
 export const maxHeightParamName = "uMaxHeight";
@@ -73,7 +73,7 @@ export const baseClearVS = /** @type glsl */
     uniform float ${patchLodCoreParamName};
 
     vec2 dCurrentFieldXZ;
-    float dCurrentFieldHeight;
+    float dCurrentAltitude;
 `;
 
 export const baseClearSubVS = /** @type glsl */
@@ -85,21 +85,21 @@ export const baseClearSubVS = /** @type glsl */
     vec3 dCurrentFieldNormal;
 `;
 
-export const currentFieldXZChunkVS = 
+export const getCurrentFieldXZChunkVS = 
 `
     vec2 getCurrentFieldXZ() {
         return vec2(${vertexCoordAttrName}) + ${patchCoordOffsetParamName};
     }
 `;
 
-export const currentFieldXZForInstancingChunkVS = /** @type glsl */
+export const getCurrentFieldXZForInstancingChunkVS = /** @type glsl */
 `
     vec2 getCurrentFieldXZ() {
         return vec2(${vertexCoordAttrName} + ${patchInstCoordOffsetAttrName});
     }
 `;
 
-export const currentFieldXZForCombineInstancingChunkVS = /** @type glsl */
+export const getCurrentFieldXZForCombineInstancingChunkVS = /** @type glsl */
 `
     const vec4 rotatePatchXZCoff[4] = vec4[4](
         vec4( 1.0,  0.0,  0.0,  1.0),
@@ -122,7 +122,7 @@ export const currentFieldXZForCombineInstancingChunkVS = /** @type glsl */
     }
 `;
 
-export const fieldCoordsChunkVS =
+export const getFieldCoordsChunkVS =
 `
     vec2 getCurrentFieldUvCoord() {
         vec2 xz = dCurrentFieldXZ;
@@ -139,26 +139,14 @@ export const fieldCoordsChunkVS =
     }
 `;
 
-export const fieldHeightFactorR32FVS = 
+export const getAltitudeFromR32FVS = 
 `
-    float getFieldHeightFactorFromTexture(uvec3 coord) {
+    float getAltitudeFromTexture(uvec3 coord) {
         return texelFetch(${heightMapParamName}, ivec3(coord), 0).r;
     }
 `;
 
-// https://stackoverflow.com/questions/63827836/is-it-possible-to-do-a-rgba-to-float-and-back-round-trip-and-read-the-pixels-in
-// note: the 0.1s here an there are voodoo related to precision
-/*
-    float rgba8uToFloat0(uvec4 v) {
-        vec4 bits  = vec4(${littleEndian ? 'v' : 'v.abgr'});
-        float sign = mix(-1.0, 1.0, step(bits[3], 128.0));
-        float expo = floor(mod(bits[3] + 0.1, 128.0)) * 2.0 + floor((bits[2] + 0.1) / 128.0) - 127.0;
-        float sig  = bits[0] + bits[1] * 256.0 + floor(mod(bits[2] + 0.1, 128.0)) * 256.0 * 256.0;
-        return sign * (1.0 + sig / 8388607.0) * pow(2.0, expo);
-    }
-*/
-
-export const fieldHeightFactorRGBA8UVS =
+export const getAltitudeFromRGBA8UVS =
 `
     float rgba8uToFloat(uvec4 v) {
         uvec4 bits = ${littleEndian ? 'v' : 'v.abgr'};
@@ -168,55 +156,35 @@ export const fieldHeightFactorRGBA8UVS =
         return sign * (1.0 + sig / 8388607.0) * pow(2.0, expo);
     }
 
-    float getFieldHeightFactorFromTexture(uvec3 coord) {
+    float getAltitudeFromTexture(uvec3 coord) {
         uvec4 rgba = texelFetch(${heightMapParamName}, ivec3(coord), 0);
         return rgba8uToFloat(rgba);
     }
 `;
 
-// Compress height by x coord [patch0, patch1] ...
-// see: CompressedPatchedHeightMap file
-export const fieldHeightFactorRG16UX2VS =
+export const getAltitudeFromR16UVS =
 `
-    float getFieldHeightFactorFromTexture(uvec3 coord) {
-
-        uint level    = coord.b;
-        uint newLevel = level / 2u;
-        uint shift    = level & 1u;
-
-        uvec4 rgba = texelFetch(${heightMapParamName}, ivec3(coord.xy, newLevel), 0);
-
-        return float(rgba[shift]) / 65535.0;
+    float getAltitudeFromTexture(uvec3 coord) {
+        uvec4 rgba = texelFetch(${heightMapParamName}, ivec3(coord), 0);
+        return float(rgba.r) * (${maxHeightParamName} / 65535.0);
     }
 `;
 
-// Compress height by x coord [patch0, patch1, patch2, patch3] ...
-// see: CompressedPatchedHeightMap file
-export const fieldHeightFactorRGBA8UX4VS =
+export const getAltitudeFromR8UVS =
 `
-    float getFieldHeightFactorFromTexture(uvec3 coord) {
-
-        uint level    = coord.b;
-        uint newLevel = level / 4u;
-        uint shift    = level & 3u;
-
-        uvec4 rgba = texelFetch(${heightMapParamName}, ivec3(coord.xy, newLevel), 0);
-
-        return float(rgba[shift]) / 255.0;
+    float getAltitudeFromTexture(uvec3 coord) {
+        uvec4 rgba = texelFetch(${heightMapParamName}, ivec3(coord), 0);
+        return float(rgba.r) * (${maxHeightParamName} / 255.0);
     }
 `;
 
-export const fieldChunkBufferCoordVS =
+export const getFieldChunkBufferCoordVS =
 `
     uvec3 getFieldChunkBufferCoord(uvec2 xz) {
-
-        uvec2 ck = xz / HM_CHUNK_SIZE_U;
-
-        uint localX = xz[0] % HM_CHUNK_SIZE_U;
-        uint localZ = xz[1] % HM_CHUNK_SIZE_U;
-        uint level  = ck[1] * HM_NUM_CHUNKS_X_U + ck[0];
-
-        return uvec3(localX, localZ, level);
+        uvec2 ck    = xz / HM_CHUNK_SIZE_U;
+        uvec2 local = xz % HM_CHUNK_SIZE_U;
+        uint level  = ck.y * HM_NUM_CHUNKS_X_U + ck.x;
+        return uvec3(local, level);
     }
 
     uvec3 getFieldChunkBufferRelativeCoord(ivec2 offset) {
@@ -226,22 +194,17 @@ export const fieldChunkBufferCoordVS =
     }
 `;
 
-export const fieldHeightFactorChunkVS = 
+export const getAltitudeFromTextureVS =
 `
-    float getFieldHeightFactor(ivec2 offset) {
+    float getAltitude(ivec2 offset) {
         uvec3 coord = getFieldChunkBufferRelativeCoord(offset);
-        return getFieldHeightFactorFromTexture(coord);
-    }
-`;
-
-export const fieldHeightChunkVS =
-`
-    float getFieldHeight(ivec2 offset) {
-        return getFieldHeightFactor(offset) * ${maxHeightParamName};
+        return getAltitudeFromTexture(coord);
     }
     
-    float getCurrentFieldHeight() {
-        return getFieldHeight(ivec2(0, 0));
+    float getCurrentAltitude() {
+        uvec2 currn = uvec2(dCurrentFieldXZ);
+        uvec3 coord = getFieldChunkBufferCoord(currn);
+        return getAltitudeFromTexture(coord);
     }
 `;
 
@@ -273,10 +236,10 @@ export const transformVS = /** @type glsl */
 
         dModelMatrix = getModelMatrix();
         dCurrentFieldXZ = getCurrentFieldXZ();
-        dCurrentFieldHeight = getCurrentFieldHeight();
+        dCurrentAltitude = getCurrentAltitude();
 
         vec2 centeredXZ = FIELD_SIZE_H_N_F + dCurrentFieldXZ;
-        vec4 localPos   = vec4(centeredXZ.r, dCurrentFieldHeight, centeredXZ.g, 1.0);
+        vec4 localPos   = vec4(centeredXZ.x, dCurrentAltitude, centeredXZ.y, 1.0);
         
         vec4 posW      = dModelMatrix * localPos;
         vec4 screenPos = matrix_viewProjection * posW;
@@ -315,13 +278,14 @@ export const normalByHeightMapVS = /** @type glsl */
 `
     vec3 getCurrentFieldNormal() {
 
-        float step  = pow(2.0, ${patchLodCoreParamName} + 1.0) / 2.0;
-        float left  = getFieldHeightFactor(ivec2( step,  0));
-        float right = getFieldHeightFactor(ivec2(-step,  0));
-        float up    = getFieldHeightFactor(ivec2( 0,     step));
-        float down  = getFieldHeightFactor(ivec2( 0,    -step));
+        float diam  = pow(2.0, ${patchLodCoreParamName} + 1.0);
+        float step  = diam / 2.0;
+        float left  = getAltitude(ivec2( step,  0));
+        float right = getAltitude(ivec2(-step,  0));
+        float up    = getAltitude(ivec2( 0,     step));
+        float down  = getAltitude(ivec2( 0,    -step));
 
-        vec3 normal = vec3(left, step * 0.02, down) - vec3(right, 0, up);
+        vec3 normal = vec3(left, diam, down) - vec3(right, 0, up);
 
         return normalize(normal);
     }
@@ -446,28 +410,34 @@ export const diffusePS = /** @type glsl */
     }
 `;
 
-export const heightMapFactorsChunks = {
-    fieldHeightFactorR32FVS,
-    fieldHeightFactorRGBA8UVS,
-    fieldHeightFactorRG16UX2VS,
-    fieldHeightFactorRGBA8UX4VS,
+export interface IAltitudeFromTextureVSStore {
+    getAltitudeFromR32FVS: string,
+    getAltitudeFromRGBA8UVS: string,
+    getAltitudeFromR16UVS: string,
+    getAltitudeFromR8UVS: string,
+}
+
+export const getAltitudeFromTextureChunks: IAltitudeFromTextureVSStore = {
+    getAltitudeFromR32FVS,
+    getAltitudeFromRGBA8UVS,
+    getAltitudeFromR16UVS,
+    getAltitudeFromR8UVS,
 }
 
 export const chunks = {
 
-    ...heightMapFactorsChunks,
+    ...getAltitudeFromTextureChunks,
 
     heightMapSampler,
 
-    currentFieldXZForCombineInstancingChunkVS,
-    currentFieldXZForInstancingChunkVS,
-    currentFieldXZChunkVS,
+    getCurrentFieldXZForCombineInstancingChunkVS,
+    getCurrentFieldXZForInstancingChunkVS,
+    getCurrentFieldXZChunkVS,
 
-    fieldHeightFactorChunkVS,
+    getAltitudeFromTextureVS,
 
-    fieldHeightChunkVS,
-    fieldCoordsChunkVS,
-    fieldChunkBufferCoordVS,
+    getFieldCoordsChunkVS,
+    getFieldChunkBufferCoordVS,
 
     normalByHeightMapVS,
 
@@ -497,19 +467,12 @@ export const chunks = {
     diffusePS,
 }
 
-export interface IFieldHeightFactorVSStore {
-    fieldHeightFactorR32FVS: string,
-    fieldHeightFactorRGBA8UVS: string,
-    fieldHeightFactorRG16UX2VS: string,
-    fieldHeightFactorRGBA8UX4VS: string,
-}
-
-export function getFieldHeightFactorVS(format: THeightMapFormat, chunksStore: IFieldHeightFactorVSStore) {
+export function getAltitudeFromTextureVSCode(format: THeightMapFormat, chunksStore: IAltitudeFromTextureVSStore) {
     switch (format) {
-        case 'r32f':   return chunksStore.fieldHeightFactorR32FVS;
-        case 'rgba':   return chunksStore.fieldHeightFactorRGBA8UVS;
-        case 'rgbaX2': return chunksStore.fieldHeightFactorRG16UX2VS;
-        case 'rgbaX4': return chunksStore.fieldHeightFactorRGBA8UX4VS;
+        case 'r32f': return chunksStore.getAltitudeFromR32FVS;
+        case 'rgba': return chunksStore.getAltitudeFromRGBA8UVS;
+        case 'r16u': return chunksStore.getAltitudeFromR16UVS;
+        case 'r8u': return chunksStore.getAltitudeFromR8UVS;
         default: break;
     }
     throw new Error('Format not supported');
@@ -517,10 +480,10 @@ export function getFieldHeightFactorVS(format: THeightMapFormat, chunksStore: IF
 
 export function getTextureType(format: THeightMapFormat) {
     switch (format) {
-        case 'r32f':   return pc.PIXELFORMAT_R32F;
-        case 'rgba':   return pc.PIXELFORMAT_RGBA8U;
-        case 'rgbaX2': return pc.PIXELFORMAT_RG16U;
-        case 'rgbaX4': return pc.PIXELFORMAT_RGBA8U;
+        case 'r32f': return pc.PIXELFORMAT_R32F;
+        case 'rgba': return pc.PIXELFORMAT_RGBA8U;
+        case 'r16u': return pc.PIXELFORMAT_R16U;
+        case 'r8u': return pc.PIXELFORMAT_R8U;
         default: break;
     }
     throw new Error('Format not supported');
@@ -528,10 +491,10 @@ export function getTextureType(format: THeightMapFormat) {
 
 export function getSamplerType(format: THeightMapFormat) {
     switch (format) {
-        case 'r32f':   return 'sampler2DArray';
-        case 'rgba':   return 'usampler2DArray';
-        case 'rgbaX2': return 'usampler2DArray';
-        case 'rgbaX4': return 'usampler2DArray';
+        case 'r32f': return 'sampler2DArray';
+        case 'rgba': return 'usampler2DArray';
+        case 'r16u': return 'usampler2DArray';
+        case 'r8u': return 'usampler2DArray';
         default: break;
     }
     throw new Error('Format not supported');
@@ -570,7 +533,7 @@ export function getFieldShaderChunks({
         .replace('%%FIELD_SIZE_Z_F%%', depth.toFixed(1))
         .replace('%%FIELD_PATCH_SIZE_X%%', patchSize.toFixed(1));
 
-    const fieldHeightFactorVS = getFieldHeightFactorVS(heightMapFormat, chunksStore);
+    const getAltitudeFromTextureVS = getAltitudeFromTextureVSCode(heightMapFormat, chunksStore);
 
     const hmVS = chunksStore.heightMapSampler.replaceAll('%%HEIGHT_MAP_SAMPLER%%', getSamplerType(heightMapFormat));
     const baseClearVS = chunksStore.baseClearVS + hmVS;
@@ -579,9 +542,9 @@ export function getFieldShaderChunks({
                         instancing === 'simple'  ? chunksStore.baseForInstancingVS :
                                                    chunksStore.baseOriginalVS;
 
-    const currentFieldXZVS = instancing === 'combine' ? chunksStore.currentFieldXZForCombineInstancingChunkVS :
-                             instancing === 'simple'  ? chunksStore.currentFieldXZForInstancingChunkVS :
-                                                        chunksStore.currentFieldXZChunkVS;
+    const currentFieldXZVS = instancing === 'combine' ? chunksStore.getCurrentFieldXZForCombineInstancingChunkVS :
+                             instancing === 'simple'  ? chunksStore.getCurrentFieldXZForInstancingChunkVS :
+                                                        chunksStore.getCurrentFieldXZChunkVS;
     
     if (engineVersion === 'v2') {
 
@@ -590,11 +553,10 @@ export function getFieldShaderChunks({
             + baseCoordVS
             + baseClearVS
             + currentFieldXZVS
-            + fieldHeightFactorVS
-            + chunksStore.fieldCoordsChunkVS
-            + chunksStore.fieldChunkBufferCoordVS
-            + chunksStore.fieldHeightFactorChunkVS
-            + chunksStore.fieldHeightChunkVS
+            + getAltitudeFromTextureVS
+            + chunksStore.getFieldCoordsChunkVS
+            + chunksStore.getFieldChunkBufferCoordVS
+            + chunksStore.getAltitudeFromTextureVS
             + chunksStore.transformVS;
 
         const diffusePS = chunksStore.gammaNormalizeChunkPS
@@ -617,13 +579,12 @@ export function getFieldShaderChunks({
     const baseVS = baseCoordVS + baseClearVS + chunksStore.baseClearSubVS;
     const transformVS = definesVS
         + currentFieldXZVS
-        + fieldHeightFactorVS
-        + chunksStore.fieldCoordsChunkVS
-        + chunksStore.fieldChunkBufferCoordVS
-        + chunksStore.fieldHeightFactorChunkVS
-        + chunksStore.fieldHeightChunkVS
+        + getAltitudeFromTextureVS
+        + chunksStore.getFieldCoordsChunkVS
+        + chunksStore.getFieldChunkBufferCoordVS
+        + chunksStore.getAltitudeFromTextureVS
         + chunksStore.transformVS;
-    
+
     const diffusePS = chunksStore.gammaNormalizeHeaderPS
                     + chunksStore.gammaNormalizeChunkPS
                     + chunksStore.diffusePS;
@@ -642,5 +603,5 @@ export function getFieldShaderChunks({
 
         // Fragment
         diffusePS,
-    }
+    };
 }

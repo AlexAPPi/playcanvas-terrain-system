@@ -62,7 +62,6 @@ export default class MeshInstanceFactory {
 
         patchMeshInstance.setParameter(patchLodCoreParamName, lodInfo.core, 0xffffffff);
         patchMeshInstance.setInstancing(instancingBuf, false);
-        patchMeshInstance.setCustomAabb(this.aabb);
 
         return patchMeshInstance;
     }
@@ -100,7 +99,6 @@ export default class MeshInstanceFactory {
 
         patchMeshInstance.setParameter(patchCoordOffsetParamName, [minX, minZ], 0xffffffff);
         patchMeshInstance.setInstancing(null);
-        patchMeshInstance.setCustomAabb(this.aabb);
 
         return patchMeshInstance;
     }

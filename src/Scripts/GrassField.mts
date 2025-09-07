@@ -1,10 +1,11 @@
-import { GrassFieldTexture } from "../GrassField/GrassFieldTexture.mjs";
-import { drawPosParamName, getGrassShaderChunks, lod2OffsetXZParamName, offsetAttrName, lod1OffsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName, fieldScaleParamName } from "../GrassField/GrassShaderChunk.mjs";
-import { drawBox } from "../Extras/Debug.mjs";
+import { GrassFieldData } from "../GrassField/GrassFieldTexture.mjs";
+import { drawPosParamName, getGrassShaderChunks, lod2OffsetXZParamName, offsetAttrName, lod1OffsetXZParamName, shapeAttrName, timeParamName, vindexAttrName, windIntensityParamName, fieldScaleParamName, circleSmoothingParamName, maxSlopeFactorParamName } from "../GrassField/GrassShaderChunk.mjs";
 import Random from "../Extras/Random.mjs";
 import { getHeightMapFormat } from "../Heightfield/GPUHeightMapBuffer.mjs";
 import { heightMapParamName, maxHeightParamName } from "../Heightfield/ShaderChunks.mjs";
 import Terrain from "./Terrain.mjs";
+import GrassFieldCompute from "../GrassField/GrassFieldCompute.mjs";
+import GrassFieldFrustum, { lod0PatchCount, lod1PatchCount, lod2PatchCount } from "../GrassField/GrassFieldFrustum.mjs";
 
 export interface IBufferStore {
 
@@ -20,27 +21,8 @@ export interface IBufferStore {
     offsetAndShape: Float32Array | Uint16Array, // webgpu not support float16 (Uint16Array = Float16Array)
 }
 
-export const quad1Matrix = [
-    2, 2,  1, 2,  0, 2,
-    0, 1,  0, 0,  1, 0,
-    2, 0,  2, 1,  1, 1
-];
+export const bufferItemSize = 8;
 
-export const quad2Matrix = [
-    4, 4,  3, 4,  2, 4,  1, 4,
-    0, 4,  0, 3,  0, 2,  0, 1,
-    0, 0,  1, 0,  2, 0,  3, 0,
-    4, 0,  4, 1,  4, 2,  4, 3
-];
-
-export const quadMatrixIndexes = [
-    [4, 3, 2], // 0
-    [5, 8, 1], // 1
-    [6, 7, 0], // 2
-];
-
-const lod1QuadCount = 8;
-const lod2QuadCount = 16;
 const tmpMat = new pc.Mat4();
 
 export interface IGrassTextureAttribute {
@@ -55,6 +37,8 @@ export class GrassField extends pc.ScriptType {
     declare public readonly gridEntity: pcx.Entity;
     declare public readonly freezeDrawPos: boolean;
     declare public readonly autoRender: boolean;
+    declare public readonly circleSmoothing: number;
+    declare public readonly maxSlopeFactor: number;
 
     declare public readonly painting: boolean;
     declare public readonly wireframe: boolean;
@@ -63,17 +47,18 @@ export class GrassField extends pc.ScriptType {
     declare public readonly seed: number;
     declare public readonly windIntensity: number;
     declare public readonly numBlades: number;
+    declare public readonly bunchWidth: number;
+    declare public readonly bunchDepth: number;
+    declare public readonly bunchRandRadius: number;
     declare public readonly radius: number;
     declare public readonly lod0BladeSegs: number;
     declare public readonly lod1BladeSegs: number;
     declare public readonly lod2BladeSegs: number;
+    declare public readonly bladeSideCount: number;
     declare public readonly bladeWidth: number;
     declare public readonly bladeMinHeight: number;
     declare public readonly bladeMaxHeight: number;
     declare public readonly textures: IGrassTextureAttribute[];
-
-    public transitionLow = 0.31;
-    public transitionHigh = 0.36;
 
     private _sharedIndexBuffer: pcx.IndexBuffer;
     private _sharedVertexBuffer: pcx.VertexBuffer;
@@ -83,35 +68,25 @@ export class GrassField extends pc.ScriptType {
     private _meshInst: pcx.MeshInstance;
     private _material: pcx.StandardMaterial;
 
-    private _dataTexture: GrassFieldTexture;
+    private _dataTexture: GrassFieldData;
     private _cameraEntity: pcx.Entity;
     private _terrain: Terrain;
     private _time: number = 0;
     private _lastDrawPos: pcx.Vec3 = new pc.Vec3();
-    private _lod1MinMaxStore: Array<[pcx.Vec3, pcx.Vec3, boolean]> = [];
-    private _lod2MinMaxStore: Array<[pcx.Vec3, pcx.Vec3, boolean]> = [];
 
+    private _frustum: GrassFieldFrustum;
+    private _compute: GrassFieldCompute;
     private _aabb: pcx.BoundingBox;
 
-    private _offsetLod1Arr: number[] = [
-        0, 0,  0, 0,
-        0, 0,  0, 0,
-        0, 0,  0, 0,
-        0, 0,  0, 0,
-    ];
-
-    private _offsetLod2Arr: number[] = [
-        0, 0,  0, 0,  0, 0,  0, 0,
-        0, 0,  0, 0,  0, 0,  0, 0,
-        0, 0,  0, 0,  0, 0,  0, 0,
-        0, 0,  0, 0,  0, 0,  0, 0,
-    ];
-
-    public get checkRadius() { return this.radius / 2; }
-    public get patchRadius() { return this.radius / 2; }
+    public get patchNumBlades() {
+        const unsafe = (this.numBlades / (lod0PatchCount + lod1PatchCount + lod2PatchCount)) | 0;
+        const root = Math.sqrt(unsafe) | 0;
+        return root * root;
+    }
 
     public destroy() {
 
+        this._compute?.destroy();
         this._sharedIndexBuffer?.destroy();
         this._sharedVertexBuffer?.destroy();
         this._sharedInstancingBuffer?.destroy();
@@ -137,7 +112,7 @@ export class GrassField extends pc.ScriptType {
 
     private _initBladesAndEditMode() {
 
-        this._updateGrassMesh(this.app.graphicsDevice, this.patchRadius);
+        this._updateGrassMesh(this.app.graphicsDevice);
 
         if (this.painting) {
             this._terrain.addLock();
@@ -151,16 +126,8 @@ export class GrassField extends pc.ScriptType {
 
         this._terrain      = terrainScript;
         this._cameraEntity = terrainScript.cameraEntity!;
-        this._dataTexture  = new GrassFieldTexture(this.app.graphicsDevice, this._terrain.width, this._terrain.depth);
-
-        // update set check is visible
-        if (this._cameraEntity.camera?.frustum.planes &&
-            this._cameraEntity.camera.frustum.planes[0] instanceof pc.Plane) {
-            this._checkIsVisible = this._checkIsVisibleNew as any;
-        }
-        else {
-            this._checkIsVisible = this._checkIsVisibleOld as any;
-        }
+        this._dataTexture  = new GrassFieldData(this.app.graphicsDevice, this._terrain.width, this._terrain.depth);
+        this._frustum      = new GrassFieldFrustum(this._terrain, this._cameraEntity.camera!.camera!);
 
         this._initBladesAndEditMode();
 
@@ -192,23 +159,56 @@ export class GrassField extends pc.ScriptType {
             this._meshInst.receiveShadow = this.receiveShadow;
         });
 
-        this.on('attr:seed',           () => this._updateMeshInstancing(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:numBlades',      () => this._updateMeshInstancing(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:bladeWidth',     () => this._updateMeshInstancing(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:bladeMinHeight', () => this._updateMeshInstancing(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:bladeMaxHeight', () => this._updateMeshInstancing(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:radius',         () => this._updateGrassMesh(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:lod0BladeSegs',  () => this._updateGrassMesh(this.app.graphicsDevice, this.patchRadius));
-        this.on('attr:lod1BladeSegs',  () => this._updateGrassMesh(this.app.graphicsDevice, this.patchRadius));
+        this.on('attr:seed',            () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:numBlades',       () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bunchWidth',      () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bunchDepth',      () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bladeWidth',      () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bladeMinHeight',  () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bladeMaxHeight',  () => this._updateMeshInstancing(this.app.graphicsDevice));
+        this.on('attr:bunchRandRadius', () => this._updateMeshInstancing(this.app.graphicsDevice));
+
+        this.on('attr:radius',         () => this._updateGrassMesh(this.app.graphicsDevice));
+        this.on('attr:lod0BladeSegs',  () => this._updateGrassMesh(this.app.graphicsDevice));
+        this.on('attr:lod1BladeSegs',  () => this._updateGrassMesh(this.app.graphicsDevice));
+        this.on('attr:lod2BladeSegs',  () => this._updateGrassMesh(this.app.graphicsDevice));
+        this.on('attr:bladeSideCount', () => this._updateGrassMesh(this.app.graphicsDevice));
+
+        this.on('attr:circleSmoothing', () => {
+            this._material.setParameter(circleSmoothingParamName, this.circleSmoothing);
+        });
+
+        this.on('attr:maxSlopeFactor', () => {
+            this._material.setParameter(maxSlopeFactorParamName, this.maxSlopeFactor);
+        });
+
+        this.on('attr:windIntensity', () => {
+            this._material.setParameter(windIntensityParamName, this.windIntensity);
+        });
+
+        this.on('attr:textures', () => {
+            this._updateMaterialDiffuseData();
+        });
     }
 
-    public update(dt: number): void {
+    private _updateMaterialDiffuseData() {
 
-        const cameraPos = this._cameraEntity.getPosition();
         const existsTexs = !!this.textures && this.textures.length > 0;
         const color = existsTexs ? this.textures[0].color : pc.Color.WHITE;
         const rand  = existsTexs ? this.textures[0].colorRandom : pc.Vec3.ZERO;
         const tex   = existsTexs ? this.textures[0].diffuse.resource : null;
+
+        this._material.setParameter('uDiffuseColor', [color.r, color.g, color.b]);
+        this._material.setParameter('uDiffuseColorRandom', [rand.x, rand.y, rand.z]);
+        this._material.setParameter('uDiffuseTex', tex as any);
+    }
+
+    public update(dt: number): void {
+
+        this._time += dt;
+
+        const cameraPos = this._cameraEntity.getPosition();
+        const camera = this._cameraEntity!.camera!.camera;
 
         if (!this.freezeDrawPos) {
 
@@ -218,186 +218,77 @@ export class GrassField extends pc.ScriptType {
             tmpMat.transformPoint(cameraPos, this._lastDrawPos);
         }
 
-        this._time += dt;
-        this._material.setParameter(timeParamName, this._time);
-        this._material.setParameter(windIntensityParamName, this.windIntensity);
-        this._material.setParameter(drawPosParamName, [this._lastDrawPos.x, this._lastDrawPos.y, this._lastDrawPos.z]);
-        this._material.setParameter('uDiffuseColor', [color.r, color.g, color.b]);
-        this._material.setParameter('uDiffuseColorRandom', [rand.x, rand.y, rand.z]);
-        this._material.setParameter('uDiffuseTex', tex as any);
+        const visibleLod1Count = this.lod1BladeSegs < 1 ? 0 : this._frustum.frustumLod1(cameraPos, this._compute.patchRadius, this.freezeDrawPos);
+        const visibleLod2Count = this.lod2BladeSegs < 1 ? 0 : this._frustum.frustumLod2(cameraPos, this._compute.patchRadius, this.freezeDrawPos);
 
-        this._frustum(cameraPos, this._cameraEntity!.camera!.camera, this.freezeDrawPos);
-    }
-
-    public updateAabb() {
+        const bladeSegsNum = this.bladeSideCount * 6;
+        const base  = this.lod2BladeSegs * bladeSegsNum * (lod2PatchCount - visibleLod2Count);
+        const count = this.lod0BladeSegs * bladeSegsNum
+                    + this.lod1BladeSegs * bladeSegsNum * visibleLod1Count
+                    + this.lod2BladeSegs * bladeSegsNum * visibleLod2Count;
         
-        const patchesAabb = this._terrain.aabb;
-
-        if (this._meshInst) {
-            this._meshInst.mesh.aabb = patchesAabb;
-            this._meshInst.aabb = patchesAabb;
-            this._meshInst.setCustomAabb(patchesAabb);
-        }
-    }
-
-    private _checkIsVisible(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: pcx.Plane[] | number[][]) {
-        return false;
-    }
-
-    private _checkIsVisibleOld(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: number[][]) {
-
-        for (let p = 0; p < 6; p++) {
-            
-            const frustumPlane = frustumPlanes[p];
-            const d = Math.max(min.x * frustumPlane[0], max.x * frustumPlane[0])
-                    + Math.max(min.y * frustumPlane[1], max.y * frustumPlane[1])
-                    + Math.max(min.z * frustumPlane[2], max.z * frustumPlane[2])
-                    + frustumPlane[3];
-
-            if (d <= 0) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private _checkIsVisibleNew(min: pcx.Vec3, max: pcx.Vec3, frustumPlanes: pcx.Plane[]) {
-
-        for (let p = 0; p < 6; p++) {
-            
-            const frustumPlane = frustumPlanes[p];
-            const d = Math.max(min.x * frustumPlane.normal.x, max.x * frustumPlane.normal.x)
-                    + Math.max(min.y * frustumPlane.normal.y, max.y * frustumPlane.normal.y)
-                    + Math.max(min.z * frustumPlane.normal.z, max.z * frustumPlane.normal.z)
-                    + frustumPlane.distance;
-
-            if (d <= 0) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private _frustumHelper(
-        count: number,
-        quadMatrix: number[],
-        quadOffset: number,
-        minMaxStore: Array<[pcx.Vec3, pcx.Vec3, boolean]>,
-        offsetArr: number[],
-        inverse: boolean,
-        cameraPos: pcx.Vec3,
-        camera: pcx.Camera,
-        freeze: boolean,
-    ) {
-        const scale        = this.entity.getScale();
-        const terrainScale = this._terrain.entity.getScale();
-        const checkRadius  = this.checkRadius * Math.max(scale.x, scale.z);
-        const maxHeight    = this._terrain.object.maxHeight * terrainScale.y;
-        const frustumPlanes = camera.frustum.planes;
-
-        let visibleCount = 0;
-
-        for (let i = 0; i < count; i++) {
-
-            if (!minMaxStore[i]) minMaxStore[i] = [new pc.Vec3(), new pc.Vec3(), false];
-            if (!freeze) {
-
-                const quadMatrixX  = quadMatrix[i * 2 + 0];
-                const quadMatrixZ  = quadMatrix[i * 2 + 1];
-                const localCenterX = this.radius * (quadMatrixX - quadOffset);
-                const localCenterZ = this.radius * (quadMatrixZ - quadOffset);
-                const worldCenterX = cameraPos.x + localCenterX * scale.x;
-                const worldCenterZ = cameraPos.z + localCenterZ * scale.z;
-
-                minMaxStore[i][0].set(
-                    worldCenterX - checkRadius,
-                    0,
-                    worldCenterZ - checkRadius
-                );
-
-                minMaxStore[i][1].set(
-                    worldCenterX + checkRadius,
-                    maxHeight,
-                    worldCenterZ + checkRadius
-                );
-
-                const visible = this._checkIsVisible(minMaxStore[i][0], minMaxStore[i][1], frustumPlanes);
-
-                if (visible) {
-                    offsetArr[visibleCount * 2 + 0] = localCenterX;
-                    offsetArr[visibleCount * 2 + 1] = localCenterZ;
-                }
-
-                minMaxStore[i][2] = visible;
-            }
-
-            const min = minMaxStore[i][0];
-            const max = minMaxStore[i][1];
-            const vis = minMaxStore[i][2];
-
-            if (freeze) {
-                drawBox({ min, max, color: vis ? pc.Color.GREEN : pc.Color.RED });
-            }
-
-            visibleCount += Number(vis);
-        }
-
-        if (!freeze && inverse && visibleCount > 0) {
-
-            const hiddenCount = count - visibleCount;
-
-            for (let i = visibleCount; i > -1; i--) {
-
-                const indexIn = (hiddenCount + i) * 2;
-                const indexOr = i * 2;
-
-                offsetArr[indexIn + 0] = offsetArr[indexOr + 0];
-                offsetArr[indexIn + 1] = offsetArr[indexOr + 1];
-            }
-        }
-
-        return visibleCount;
-    }
-
-    private _frustum(cameraPos: pcx.Vec3, camera: pcx.Camera, freeze: boolean) {
-
-        const visibleLod1Count = this._frustumHelper(lod1QuadCount, quad1Matrix, 1, this._lod1MinMaxStore, this._offsetLod1Arr, false, cameraPos, camera, freeze);
-        const visibleLod2Count = this._frustumHelper(lod2QuadCount, quad2Matrix, 2, this._lod2MinMaxStore, this._offsetLod2Arr, true, cameraPos, camera, freeze);
-
-        const meshInst  = this._meshInst;
-        const mesh      = meshInst.mesh;
+        const mesh      = this._meshInst.mesh;
         const primitive = mesh.primitive[0];
-        const base      = this.lod2BladeSegs * 12 * (lod2QuadCount - visibleLod2Count);
-        const count     = this.lod0BladeSegs * 12
-                        + this.lod1BladeSegs * 12 * visibleLod1Count
-                        + this.lod2BladeSegs * 12 * visibleLod2Count;
-        
-        meshInst.setParameter(`${lod1OffsetXZParamName}[0]`, this._offsetLod1Arr);
-        meshInst.setParameter(`${lod2OffsetXZParamName}[0]`, this._offsetLod2Arr);
-
-        // always true for lod 0
-        meshInst.visible = this.autoRender || freeze;
-        meshInst.visibleThisFrame = this.autoRender || freeze;
 
         primitive.base  = base;
         primitive.count = count;
 
+        // always true for lod 0
+        this._meshInst.visible = this.autoRender || this.freezeDrawPos;
+        this._meshInst.visibleThisFrame = this.autoRender || this.freezeDrawPos;
+        this._meshInst.setParameter(`${lod1OffsetXZParamName}[0]`, this._frustum.lod1Offsets);
+        this._meshInst.setParameter(`${lod2OffsetXZParamName}[0]`, this._frustum.lod2Offsets);
+
+        this._material.setParameter(timeParamName, this._time);
+        this._material.setParameter(drawPosParamName, [this._lastDrawPos.x, this._lastDrawPos.y, this._lastDrawPos.z]);
+
         if (this.app.keyboard?.wasReleased(pc.KEY_V)) {
             console.log(visibleLod1Count);
             console.log(visibleLod2Count);
-            console.log(this._offsetLod1Arr);
-            console.log(this._offsetLod2Arr);
+        }
+
+        this._frustum.drawCornes(this.freezeDrawPos);
+        this._compute.update(this._lastDrawPos);
+    }
+
+    public updateAabb() {
+
+        if (this._meshInst) {
+
+            const scale        = this.entity.getScale();
+            const terrainScale = this._terrain.entity.getScale();
+            const worldRadius  = this.radius * Math.max(scale.x, scale.z);
+            const maxHeight    = this._terrain.object.maxHeight * terrainScale.y;
+
+            this._aabb ??= new pc.BoundingBox();
+            this._aabb.setMinMax(
+                new pc.Vec3(-worldRadius, 0, -worldRadius),
+                new pc.Vec3( worldRadius, maxHeight, worldRadius)
+            );
+
+            this._meshInst.mesh.aabb = this._aabb;
         }
     }
-    
-    private _updateGrassMesh(graphicsDevice: pcx.GraphicsDevice, radius: number) {
+
+    private _updateCompute() {
+
+        if (!this._compute ||
+            this._compute.radius !== this.radius) {
+            this._compute?.destroy();
+            this._compute = new GrassFieldCompute(this.app.graphicsDevice, this.radius, this._terrain);
+        }
+
+        this._material.setParameter("uComputeHMData", this._compute.bufferHeightMap);
+        this._material.setParameter("uComputeNMData", this._compute.bufferNormalMap);
+    }
+
+    private _updateGrassMesh(graphicsDevice: pcx.GraphicsDevice) {
 
         this._updateMeshBuffers(graphicsDevice);
         this._updateMeshMaterial(graphicsDevice);
         this._updateMeshInstance(graphicsDevice);
-        this._updateMeshInstancing(graphicsDevice, radius);
+        this._updateMeshInstancing(graphicsDevice);
+
         this.updateAabb();
 
         const meshInstances = [this._meshInst];
@@ -414,16 +305,20 @@ export class GrassField extends pc.ScriptType {
             });
         }
 
+        this._meshInst.cull = false;
         this._meshInst.castShadow = this.castShadow;
         this._meshInst.receiveShadow = this.receiveShadow;
     }
 
-    private _updateMeshInstancing(graphicsDevice: pcx.GraphicsDevice, radius: number) {
+    private _updateMeshInstancing(graphicsDevice: pcx.GraphicsDevice) {
+
         if (this._meshInst) {
-            this._updateInstancingBuffer(graphicsDevice, radius);
+            this._updateInstancingBuffer(graphicsDevice);
             this._meshInst?.instancingData?.vertexBuffer?.destroy();
             this._meshInst.setInstancing(this._sharedInstancingBuffer);
         }
+
+        this._updateCompute();
     }
 
     private _updateMeshInstance(graphicsDevice: pcx.GraphicsDevice) {
@@ -456,6 +351,8 @@ export class GrassField extends pc.ScriptType {
 
         let seg: number;
 
+        const addBackSide = vc1 !== vc2;
+
         // blade front side
         for (seg = 0; seg < bladeSegs; ++seg) {
            id[i++] = vc1 + 0; // tri 1
@@ -467,15 +364,18 @@ export class GrassField extends pc.ScriptType {
            vc1 += 2;
         }
 
-        // blade back side
-        for (seg = 0; seg < bladeSegs; ++seg) {
-           id[i++] = vc2 + 2; // tri 1
-           id[i++] = vc2 + 1;
-           id[i++] = vc2 + 0;
-           id[i++] = vc2 + 3; // tri 2
-           id[i++] = vc2 + 1;
-           id[i++] = vc2 + 2;
-           vc2 += 2;
+        if (addBackSide) {
+
+            // blade back side
+            for (seg = 0; seg < bladeSegs; ++seg) {
+                id[i++] = vc2 + 2; // tri 1
+                id[i++] = vc2 + 1;
+                id[i++] = vc2 + 0;
+                id[i++] = vc2 + 3; // tri 2
+                id[i++] = vc2 + 1;
+                id[i++] = vc2 + 2;
+                vc2 += 2;
+            }
         }
         
         return i;
@@ -488,57 +388,84 @@ export class GrassField extends pc.ScriptType {
         }
     }
 
-    private _initBladeOffsetShapeVerts(offsetShape: Uint16Array | Float32Array, radius: number, numBlades: number) {
+    private _initPatchBladeOffsetShapeVerts(offsetShape: Uint16Array | Float32Array, patchSize: number, patchNumBlades: number) {
         
+        const size = Math.sqrt(patchNumBlades);
+
+        if (size !== Math.ceil(size)) {
+            throw new Error("numBlades must be the largest square");
+        }
+
         const normalizeValue = offsetShape instanceof Uint16Array ? pc.FloatPacking.float2Half : (x: number) => x;
         const random = new Random(this.seed);
         const heightFactor = this.bladeMaxHeight - this.bladeMinHeight;
+        const bunchSizeX = this.bunchWidth || 1;
+        const bunchSizeZ = this.bunchDepth || 1;
 
         //let noise = 0;
-        for (let i = 0; i < numBlades; ++i) {
 
-            //noise = Math.abs(simplex(offsetShape[i * 8 + 0] * 0.03, offsetShape[i * 8 + 2] * 0.03));
-            //noise = noise * noise * noise;
-            //noise *= 5.0;
+        for (let z = 0; z < size; z += bunchSizeZ) {
 
-            const x = random.nrand() * radius;
-            const y = random.nrand() * radius;
-            const z = 0;
+            for (let x = 0; x < size; x += bunchSizeX) {
 
-            const rotation = Math.PI * 2.0 * random.random();
-            const width    = this.bladeWidth + random.random() * this.bladeWidth * 0.5;
-            const height   = this.bladeMinHeight + Math.pow(random.random(), 4.0) * heightFactor;
-            const lean     = 0.01 + random.random() * 0.3;
-            const curve    = 0.05 + random.random() * 0.3;
+                const tmp = 0;
+                const randBunchX = random.nextFloat(0, size);
+                const randBunchZ = random.nextFloat(0, size);
 
-            offsetShape[i * 8 + 0] = normalizeValue(x); // x
-            offsetShape[i * 8 + 1] = normalizeValue(y); // y
-            offsetShape[i * 8 + 2] = normalizeValue(z); // z
-            offsetShape[i * 8 + 3] = normalizeValue(rotation); // rot
+                for (let bunchZ = 0; bunchZ < bunchSizeZ; bunchZ++) {
 
-            offsetShape[i * 8 + 4] = normalizeValue(width);  // width
-            offsetShape[i * 8 + 5] = normalizeValue(height); //+ noise; //+ height
-            offsetShape[i * 8 + 6] = normalizeValue(lean);   // lean
-            offsetShape[i * 8 + 7] = normalizeValue(curve);  // curve
+                    for (let bunchX = 0; bunchX < bunchSizeX; bunchX++) {
+
+                        const index = (x + bunchX) + (z + bunchZ) * size;
+
+                        const theta = random.nextFloat(0, Math.PI * 2);
+                        const randRadius = this.bunchRandRadius * Math.sqrt(random.random());
+                        const resultFloatX = randBunchX + randRadius * Math.cos(theta);
+                        const resultFloatZ = randBunchZ + randRadius * Math.sin(theta);
+
+                        // clamp by patch size and transform to [-1, 1]
+                        const normalizeForPSX = resultFloatX / size * patchSize - patchSize / 2;
+                        const normalizeForPSZ = resultFloatZ / size * patchSize - patchSize / 2;
+
+                        const rotation = Math.PI * 2.0 * random.random();
+                        const width    = this.bladeWidth + random.random() * this.bladeWidth * 0.5;
+                        const height   = this.bladeMinHeight + Math.pow(random.random(), 4.0) * heightFactor;
+                        const lean     = 0.01 + random.random() * 0.3;
+                        const curve    = 0.05 + random.random() * 0.3;
+
+                        offsetShape[index * bufferItemSize + 0] = normalizeValue(normalizeForPSX); // x
+                        offsetShape[index * bufferItemSize + 1] = normalizeValue(normalizeForPSZ); // y
+                        offsetShape[index * bufferItemSize + 2] = normalizeValue(tmp);
+                        offsetShape[index * bufferItemSize + 3] = normalizeValue(rotation); // rot
+
+                        //noise = Math.abs(simplex(floatX * 0.03, floatY * 0.03));
+                        //noise = noise * noise * noise;
+                        //noise *= 5.0;
+
+                        offsetShape[index * bufferItemSize + 4] = normalizeValue(width);  // width
+                        offsetShape[index * bufferItemSize + 5] = normalizeValue(height /* + noise */); // height
+                        offsetShape[index * bufferItemSize + 6] = normalizeValue(lean);   // lean
+                        offsetShape[index * bufferItemSize + 7] = normalizeValue(curve);  // curve
+                    }
+                }
+            }
         }
     }
-    
-    private _updateInstancingBuffer(graphicsDevice: pcx.GraphicsDevice, radius: number) {
+
+    private _updateInstancingBuffer(graphicsDevice: pcx.GraphicsDevice) {
 
         this._sharedInstancingBuffer?.destroy();
 
-        const lod0PatchCount = 1;
-        const lod1PatchCount = 8;
-        const lod2PatchCount = 16;
-        const patchNumBlades = (this.numBlades / (lod0PatchCount + lod1PatchCount + lod2PatchCount)) | 0;
-        const offsetAndShapeLength = patchNumBlades * 8;
+        const patchNumBlades = this.patchNumBlades;
+        const patchSize = GrassFieldCompute.getNormalizeRadius(this.radius) / 2.5;
+        const offsetAndShapeLength = patchNumBlades * bufferItemSize;
 
         if (this._bufferStore.offsetAndShape === undefined ||
             this._bufferStore.offsetAndShape.length !== offsetAndShapeLength) {
             this._bufferStore.offsetAndShape = new Float32Array(offsetAndShapeLength);
         }
 
-        this._initBladeOffsetShapeVerts(this._bufferStore.offsetAndShape, radius, patchNumBlades);
+        this._initPatchBladeOffsetShapeVerts(this._bufferStore.offsetAndShape, patchSize, patchNumBlades);
 
         const type = this._bufferStore.offsetAndShape instanceof Uint16Array ? pc.TYPE_FLOAT16 : pc.TYPE_FLOAT32;
         const instancingFormat = new pc.VertexFormat(graphicsDevice, [
@@ -581,10 +508,12 @@ export class GrassField extends pc.ScriptType {
         this._sharedVertexBuffer?.destroy();
 
         const lod0VC = (this.lod0BladeSegs + 1) * 2;
-        const lod1VC = (this.lod1BladeSegs + 1) * 2;
-        const lod2VC = (this.lod2BladeSegs + 1) * 2;
-        const indexLength = this.lod0BladeSegs * 12 + this.lod1BladeSegs * 12 * lod1QuadCount + this.lod2BladeSegs * 12 * lod2QuadCount;
-        const indexVertsLength = lod0VC * 2 + lod1VC * 2 * lod1QuadCount + lod2VC * 2 * lod2QuadCount;
+        const lod1VC = this.lod1BladeSegs > 0 ? (this.lod1BladeSegs + 1) * 2 : 0;
+        const lod2VC = this.lod2BladeSegs > 0 ? (this.lod2BladeSegs + 1) * 2 : 0;
+
+        const bladeSegsNum = this.bladeSideCount * 6;
+        const indexLength = this.lod0BladeSegs * bladeSegsNum + this.lod1BladeSegs * bladeSegsNum * lod1PatchCount + this.lod2BladeSegs * bladeSegsNum * lod2PatchCount;
+        const indexVertsLength = lod0VC * this.bladeSideCount + lod1VC * this.bladeSideCount * lod1PatchCount + lod2VC * this.bladeSideCount * lod2PatchCount;
 
         if (this._bufferStore.index === undefined ||
             this._bufferStore.index.length !== indexLength) {
@@ -592,25 +521,31 @@ export class GrassField extends pc.ScriptType {
 
             let index = 0;
 
-            for (let i = 0; i < lod2QuadCount; i++) {
+            if (this.lod2BladeSegs > 0) {
 
-                const lod2VC1 = i * lod2VC * 2;
-                const lod2VC2 = lod2VC1 + lod2VC;
+                for (let i = 0; i < lod2PatchCount; i++) {
 
-                index = this._initBladeIndices(this._bufferStore.index, lod2VC1, lod2VC2, index, this.lod2BladeSegs);
+                    const lod2VC1 = i * lod2VC * this.bladeSideCount;
+                    const lod2VC2 = lod2VC1 + lod2VC * (this.bladeSideCount - 1);
+
+                    index = this._initBladeIndices(this._bufferStore.index, lod2VC1, lod2VC2, index, this.lod2BladeSegs);
+                }
             }
 
-            const lod0VC1 = lod2QuadCount * lod2VC * 2;
-            const lod0VC2 = lod0VC1 + lod0VC;
+            const lod0VC1 = lod2VC * lod2PatchCount * this.bladeSideCount;
+            const lod0VC2 = lod0VC1 + lod0VC * (this.bladeSideCount - 1);
 
             index = this._initBladeIndices(this._bufferStore.index, lod0VC1, lod0VC2, index, this.lod0BladeSegs);
 
-            for (let i = 0; i < lod1QuadCount; i++) {
-    
-                const lod1VC1 = lod0VC2 + lod0VC + i * lod1VC * 2;
-                const lod1VC2 = lod1VC1 + lod1VC;
+            if (this.lod1BladeSegs > 0) {
 
-                index = this._initBladeIndices(this._bufferStore.index, lod1VC1, lod1VC2, index, this.lod1BladeSegs);
+                for (let i = 0; i < lod1PatchCount; i++) {
+        
+                    const lod1VC1 = lod0VC2 + lod0VC + i * lod1VC * this.bladeSideCount;
+                    const lod1VC2 = lod1VC1 + lod1VC * (this.bladeSideCount - 1);
+
+                    index = this._initBladeIndices(this._bufferStore.index, lod1VC1, lod1VC2, index, this.lod1BladeSegs);
+                }
             }
         }
 
@@ -641,6 +576,10 @@ export class GrassField extends pc.ScriptType {
         this._material?.destroy();
         this._material = new pc.StandardMaterial();
         this._material.name = "GrassFieldMaterial";
+        //this._material.useMetalness = true;
+
+        // Useful for bladeSideCount == 1
+        // this._material.cull = pc.CULLFACE_NONE;
 
         /*
         this._material.depthTest = false;
@@ -664,27 +603,30 @@ export class GrassField extends pc.ScriptType {
         this._material.setParameter(heightMapParamName, heightMap);
         this._material.setParameter(fieldScaleParamName, [terrainScale.x, terrainScale.y, terrainScale.z]);
         this._material.setParameter(maxHeightParamName, terrain.maxHeight);
-        this._material.setParameter(`${lod1OffsetXZParamName}[0]`, this._offsetLod1Arr);
-        this._material.setParameter(`${lod2OffsetXZParamName}[0]`, this._offsetLod2Arr);
+        this._material.setParameter(`${lod1OffsetXZParamName}[0]`, this._frustum.lod1Offsets);
+        this._material.setParameter(`${lod2OffsetXZParamName}[0]`, this._frustum.lod2Offsets);
 
         this._material.setParameter(drawPosParamName, [0, 0, 0]);
         this._material.setParameter(timeParamName, this._time);
         this._material.setParameter(windIntensityParamName, 0);
-        
+        this._material.setParameter(circleSmoothingParamName, this.circleSmoothing);
+        this._material.setParameter(maxSlopeFactorParamName, this.maxSlopeFactor);
+
+        this._updateMaterialDiffuseData();
+
         const hmFormat = getHeightMapFormat(graphicsDevice, terrain.heightMap);
         const pcVersion = `v${pc.version[0]}` as unknown as any;
+        const normalizeRadius = GrassFieldCompute.getNormalizeRadius(this.radius);
         const chunksStore = getGrassShaderChunks({
             width: terrain.width,
             depth: terrain.depth,
             heightMapChunkSize: terrain.heightMap.dataChunkSize,
             heightMapFormat: hmFormat,
-            bladeMaxHeight: this.bladeMaxHeight * 1.5,
             lod0BladeSegs: this.lod0BladeSegs,
             lod1BladeSegs: this.lod1BladeSegs,
             lod2BladeSegs: this.lod2BladeSegs,
-            radius: this.radius,
-            transitionLow: this.transitionLow,
-            transitionHigh: this.transitionHigh,
+            sideCount: this.bladeSideCount,
+            radius: normalizeRadius,
             engineVersion: pcVersion,
         });
 
@@ -725,16 +667,22 @@ GrassField.attributes.add("receiveShadow", { type: "boolean", default: true, });
 GrassField.attributes.add("wireframe", { type: "boolean", default: false });
 GrassField.attributes.add("freezeDrawPos", { type: "boolean", default: false });
 GrassField.attributes.add("autoRender", { type: "boolean", default: true });
-GrassField.attributes.add("seed", { type: "number", default: 53464546455, min: 1, step: 1, precision: 0 });
+GrassField.attributes.add("circleSmoothing", { type: "number", default: 2.4, min: 0.5, max: 3.5 });
+GrassField.attributes.add("maxSlopeFactor", { type: "number", default: 0.85, min: 0.001, max: 1.0 });
+GrassField.attributes.add("seed", { type: "number", default: 919191, min: 1, step: 1, precision: 0 });
 GrassField.attributes.add("windIntensity", { type: "number", default: 0, min: -30, max: 30 });
+GrassField.attributes.add("radius", { type: "number", default: 80, min: 1, max: 300, step: 1, precision: 0 });
 GrassField.attributes.add("numBlades", { type: "number", default: 4000, min: 0, max: 8000000, step: 1, precision: 0 });
-GrassField.attributes.add("radius", { type: "number", default: 80, min: 1, max: 10000 });
-GrassField.attributes.add("lod0BladeSegs", { type: "number", default: 3, min: 1, max: 10, step: 1, precision: 0 });
-GrassField.attributes.add("lod1BladeSegs", { type: "number", default: 2, min: 1, max: 10, step: 1, precision: 0 });
-GrassField.attributes.add("lod2BladeSegs", { type: "number", default: 1, min: 1, max: 10, step: 1, precision: 0 });
+GrassField.attributes.add("bunchWidth", { type: "number", default: 4, min: 1, max: 20, step: 1, precision: 0 });
+GrassField.attributes.add("bunchDepth", { type: "number", default: 4, min: 1, max: 20, step: 1, precision: 0 });
+GrassField.attributes.add("bunchRandRadius", { type: "number", default: 0, min: 0, max: 10 });
+GrassField.attributes.add("lod0BladeSegs", { type: "number", default: 3, min: 1, max: 20, step: 1, precision: 0 });
+GrassField.attributes.add("lod1BladeSegs", { type: "number", default: 2, min: 0, max: 20, step: 1, precision: 0 });
+GrassField.attributes.add("lod2BladeSegs", { type: "number", default: 1, min: 0, max: 20, step: 1, precision: 0 });
+GrassField.attributes.add("bladeSideCount", { type: "number", default: 2, min: 1, max: 2, step: 1, precision: 0 });
 GrassField.attributes.add("bladeWidth", { type: "number", default: 0.04, min: 0.01, max: 5 });
 GrassField.attributes.add("bladeMinHeight", { type: "number", default: 0.25, min: 0.01, max: 10 });
-GrassField.attributes.add("bladeMaxHeight", { type: "number", default: 1, min: 0.01, max: 10 });
+GrassField.attributes.add("bladeMaxHeight", { type: "number", default: 1, min: 0.01, max: 20 });
 GrassField.attributes.add("textures", {
     type: "json",
     array: true,

@@ -1,5 +1,5 @@
 import type { float, int } from "../Extras/Types.mjs";
-import AbsHeightMap, { IReadonlyAbsHeightMap, THeightMapFormat } from "./AbsHeightMap.mjs";
+import AbsHeightMap, { IReadonlyAbsHeightMap } from "./AbsHeightMap.mjs";
 
 export type  HeightMapArrType = Float32Array;
 export const HeightMapArrType = Float32Array;
@@ -26,7 +26,6 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
     public get width() { return this._width; }
     public get depth() { return this._depth; }
     public get data()  { return this._data; }
-    public get format(): THeightMapFormat { return 'rgba'; }
 
     public get itemSize()              { return this._itemSize; }
     public get itemHeightIndexOffset() { return this._itemHeightIndexOffset; }
@@ -70,25 +69,21 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
         }
     }
 
-    protected _encodeHeightFactor(store: TData, index: int, value: float) {
-        store[index] = value;
+    protected _encodeHeight(store: TData, index: int, value: float, max: float) {
+        store[index] = Math.max(Math.min(value, max), 0);
     }
-    
-    protected _decodeHeightFactor(store: Record<number, number>, index: int) {
+
+    protected _decodeHeight(store: TData, index: int, max: float) {
         return store[index];
     }
-    
-    protected _decodeHeight(store: Record<number, number>, index: int, max: float) {
-        return this._decodeHeightFactor(store, index) * max;
+
+    protected _decodeHeightFactor(store: TData, index: int, max: float) {
+        return store[index] / max;
     }
 
-    protected _encodeAndSetHeightFactor(store: TData, index: int, realHeight: float, max: float) {
-
-        const normalize = Math.max(Math.min(realHeight, max), 0);
-        const factor    = normalize / max;
-    
-               this._encodeHeightFactor(store, index, factor);
-        return this._decodeHeightFactor(store, index);
+    protected _encodeAndSet(store: TData, index: int, value: float, max: float) {    
+        this._encodeHeight(store, index, value, max);
+        return this._decodeHeight(store, index, max);
     }
     
     public getIndex(x: int, z: int) {
@@ -97,7 +92,7 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
 
     public getFactor(x: int, z: int) {
         const index = this.getIndex(x, z);
-        return this._decodeHeightFactor(this._data, index);
+        return this._decodeHeightFactor(this._data, index, this._maxHeight);
     }
 
     public override get(x: int, z: int) {
@@ -107,7 +102,7 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
 
     public override set(x: int, z: int, value: float) {
         const index = this.getIndex(x, z);
-        return this._encodeAndSetHeightFactor(this._data, index, value, this._maxHeight);
+        return this._encodeAndSet(this._data, index, value, this._maxHeight);
     }
 
     public setMaxHeight(maxHeight: float) {
@@ -120,7 +115,7 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
         const oldValue  = this._decodeHeight(this._data, index, this._maxHeight);
         const canValue  = oldValue + value;
 
-        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._maxHeight);
+        return this._encodeAndSet(this._data, index, canValue, this._maxHeight);
     }
 
     public override multiply(x: int, z: int, value: float, heightIfZero: float = 0) {
@@ -129,7 +124,7 @@ export class HeightMap<TData extends Float32Array | Uint16Array | Uint8Array = H
         const oldValue  = this._decodeHeight(this._data, index, this._maxHeight) || heightIfZero;
         const canValue  = oldValue * value;
 
-        return this._encodeAndSetHeightFactor(this._data, index, canValue, this._maxHeight);
+        return this._encodeAndSet(this._data, index, canValue, this._maxHeight);
     }
 }
 

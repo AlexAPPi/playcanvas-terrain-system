@@ -14,7 +14,7 @@ export interface IRenderOptions {
     receiveShadow?: boolean,
 }
 
-export default class PatchesRenderPreparer extends EntityPatchesMesh implements IPatchesState {
+export default class ViewPatchesRenderPreparer extends EntityPatchesMesh implements IPatchesState {
 
     private _wireframe: boolean;
     private _castShadow: boolean;
@@ -43,12 +43,12 @@ export default class PatchesRenderPreparer extends EntityPatchesMesh implements 
         this._updateMeshes();
     }
 
-    constructor(lodSate: ILodState, meshFactory: MeshInstanceFactory, entity: pcx.Entity, options: IRenderOptions) {
-        super(meshFactory, entity);
+    constructor(lodSate: ILodState, meshFactory: MeshInstanceFactory, entity: pcx.Entity, layerName: string, options?: IRenderOptions) {
+        super(meshFactory, entity, layerName);
         this._lodState = lodSate;
-        this._wireframe = options.wireframe ?? false;
-        this._castShadow = options.castShadow ?? false;
-        this._receiveShadow = options.receiveShadow ?? false;
+        this._wireframe = options?.wireframe ?? false;
+        this._castShadow = options?.castShadow ?? false;
+        this._receiveShadow = options?.receiveShadow ?? false;
         this._bufferArray = new Array(this.meshInstanceArray.length);
     }
 
@@ -74,7 +74,7 @@ export default class PatchesRenderPreparer extends EntityPatchesMesh implements 
         }
     }
 
-    protected _freeIfNeedWireframe(meshInstance: pcx.MeshInstance | null | undefined, lod: IPatchLodBase) {
+    protected _unsetIfNeedWireframe(meshInstance: pcx.MeshInstance | null | undefined, lod: IPatchLodBase) {
 
         if (meshInstance && !this._wireframe) {
             
@@ -91,12 +91,12 @@ export default class PatchesRenderPreparer extends EntityPatchesMesh implements 
             const buffer = this._bufferArray[i];
 
             this._updateMesh(meshInstance, buffer.lod);
-            this._freeIfNeedWireframe(meshInstance, buffer.lod);
+            this._unsetIfNeedWireframe(meshInstance, buffer.lod);
         }
 
         this.instancing?.forEach(item => {
             this._updateMesh(item.object, item.lod);
-            this._freeIfNeedWireframe(item.object, item.lod);
+            this._unsetIfNeedWireframe(item.object, item.lod);
         });
     }
 
@@ -138,33 +138,36 @@ export default class PatchesRenderPreparer extends EntityPatchesMesh implements 
                     const meshInstance = inst.object;
 
                     meshInstance.visible = true;
-                    meshInstance.castShadow = this._castShadow;
-                    meshInstance.receiveShadow = this._receiveShadow;
                 }
             }
         }
         else {
 
             const meshInstance = this.getOrCreatePatchMesh(index);
-            const mesh = meshInstance.mesh;
-            const primitive = mesh.primitive[0];
-
-            primitive.base  = info.start;
-            primitive.count = info.count;
 
             meshInstance.visible = visible;
-            meshInstance.setParameter(patchLodCoreParamName, lod.core);
 
-            this._updateMesh(meshInstance, lod);
+            if (visible) {
+
+                const mesh = meshInstance.mesh;
+                const primitive = mesh.primitive[0];
+
+                primitive.base  = info.start;
+                primitive.count = info.count;
+
+                meshInstance.setParameter(patchLodCoreParamName, lod.core);
+
+                this._updateMesh(meshInstance, lod);
+            }
         }
     }
 
     public beforeUpdate(): void {
-        this.instancing?.begin(false, false);
+        this.instancing?.begin(false);
     }
 
     public afterUpdate(): void {
-        this.updateRenderComponent();
         this.instancing?.end();
+        this.updateRenderComponent();
     }
 }

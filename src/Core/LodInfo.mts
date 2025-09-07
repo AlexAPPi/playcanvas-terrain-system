@@ -17,8 +17,7 @@ export function initInfo(): ISingleLodInfo[][][][] {
     for (let l = 0; l < LEFT;   l++) { arr[l] = new Array<ISingleLodInfo[][]>(RIGHT);
     for (let r = 0; r < RIGHT;  r++) { arr[l][r] = new Array<ISingleLodInfo[]>(TOP);
     for (let t = 0; t < TOP;    t++) { arr[l][r][t] = new Array<ISingleLodInfo>(BOTTOM);
-    for (let b = 0; b < BOTTOM; b++) {
-        arr[l][r][t][b] = {
+    for (let b = 0; b < BOTTOM; b++) { arr[l][r][t][b] = {
             start: 0,
             count: 0
         };

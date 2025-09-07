@@ -3,13 +3,13 @@ import type { IZone } from "./IZone.mjs";
 import AbsHeightMapFileIO, { type IHeightMapFileImportOptions } from "./AbsHeightMapFileIO.mjs";
 
 /**
+ * @variant rgba - foramt by uint8[4] texture (for polyfill support float32)
  * @variant r32f - format by float32 texture
- * @variant rgba - foramt by uint8[4] texture
- * @variant rgbaX2 - format compressed by 2 patches by x coordinate
- * @variant rgbaX4 - format compressed by 4 patches by x coordinate
- * @see CompressedPatchedHeightMap
+ * @variant r16u - format by uint16 texture
+ * @variant r8u  - format by uint8 texture
+ * @see PatchedHeightMap
  */
-export type THeightMapFormat = 'r32f' | 'rgba' | 'rgbaX2' | 'rgbaX4';
+export type THeightMapFormat = 'rgba' | 'r32f' | 'r16u' | 'r8u';
 
 export interface IReadonlyAbsHeightMap {
 
@@ -53,16 +53,16 @@ export abstract class AbsHeightMap extends AbsHeightMapFileIO implements IReadon
             (intZ + 1 >= this.depth)) {
             return x0z0;
         }
-    
+
         const x1z0 = this.get(intX + 1, intZ);
         const x0z1 = this.get(intX,     intZ + 1);
         const x1z1 = this.get(intX + 1, intZ + 1);
-    
+
         const factorX = x - intX;
-    
+
         const interpolatedBottom = (x1z0 - x0z0) * factorX + x0z0;
         const interpolatedTop    = (x1z1 - x0z1) * factorX + x0z1;
-    
+
         const factorZ = z - intZ;
 
         const finalHeight = (interpolatedTop - interpolatedBottom) * factorZ + interpolatedBottom;

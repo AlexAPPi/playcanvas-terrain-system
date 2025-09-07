@@ -34,7 +34,7 @@ export default class PatchInstancing extends PatchInstancingNative<pcx.MeshInsta
         return i;
     }
 
-    public begin(castShadow: boolean = false, receiveShadow: boolean = false) {
+    public begin(castShadow: boolean = false) {
         for (let c = 0; c < this.data.length; c++) {
             for (let l = 0; l < LEFT; l++) {
                 for (let r = 0; r < RIGHT; r++) {
@@ -50,7 +50,6 @@ export default class PatchInstancing extends PatchInstancingNative<pcx.MeshInsta
                             if (chunkObject) {
                                 chunkObject.visible = false;
                                 chunkObject.castShadow = castShadow;
-                                chunkObject.receiveShadow = receiveShadow;
                             }
                         }
                     }

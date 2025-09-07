@@ -22,6 +22,7 @@ export default class EntityPatchesMesh extends SquareIterator {
     protected readonly _numPatchesX: number;
     protected readonly _numPatchesZ: number;
 
+    private _layerName: string;
     private _entity: pcx.Entity;
     private _material: pcx.StandardMaterial;
     private _meshFactory: MeshInstanceFactory;
@@ -37,12 +38,25 @@ export default class EntityPatchesMesh extends SquareIterator {
     public get meshInstanceArray(): Readonly<typeof this._meshInstanceArray> { return this._meshInstanceArray; }
     public get aabb() { return this._meshFactory.aabb; }
     public get material() { return this._material; }
+    public get entity() { return this._entity; }
 
     public get patchSize() { return this._patchSize; }
     public get numPatchesX() { return this._numPatchesX; }
     public get numPatchesZ() { return this._numPatchesZ; }
 
-    constructor(meshFactory: MeshInstanceFactory, entity: pcx.Entity) {
+    public get layerName() { return this._layerName; }
+    public set layerName(value: string) {
+
+        const update = this._layerName !== value;
+        this._layerName = value;
+
+        if (update) {
+            this._forceUpdateRenderComponent();
+            this._updateLayer();
+        }
+    }
+    
+    constructor(meshFactory: MeshInstanceFactory, entity: pcx.Entity, layerName: string) {
 
         super(meshFactory.buffersManager.heightMap.field);
 
@@ -50,6 +64,7 @@ export default class EntityPatchesMesh extends SquareIterator {
         this._numPatchesX = this.field.numPatchesX;
         this._numPatchesZ = this.field.numPatchesZ;
 
+        this._layerName = layerName;
         this._entity = entity;
         this._material = EntityPatchesMesh.createMaterial();
         this._meshFactory = meshFactory;
@@ -60,6 +75,46 @@ export default class EntityPatchesMesh extends SquareIterator {
         this._meshInstanceArray = new Array(this._numPatchesX * this._numPatchesZ);
 
         this._meshFactory.bindDependenciesToMaterial(this.instancing, this._material, true);
+    }
+
+    private _updateLayer() {
+
+        if (this._entity.render) {
+
+            const app = this._meshFactory.buffersManager.heightMap.app;
+            const layer = app.scene.layers.getLayerByName(this._layerName);
+
+            this._entity.render.layers = [layer!.id];
+        }
+    }
+
+    protected _updateMeshInstanceForRender(meshInstances: pcx.MeshInstance[]) {
+        for (let i = 0; i < meshInstances.length; i++) {
+            const meshInstance = meshInstances[i];
+            meshInstance.cull = false;
+            meshInstance.visible = false;
+            meshInstance.castShadow = false;
+            meshInstance.receiveShadow = true;
+        }
+    }
+
+    protected _createRenderComponent(meshInstances: pcx.MeshInstance[]) {
+        this._entity.addComponent('render', {
+            meshInstances: meshInstances,
+            castShadows: false,
+            castShadowsLightmap: false,
+            receiveShadows: true,
+        });
+    }
+
+    protected _updateRenderComponent(append: boolean, meshInstances: pcx.MeshInstance[]) {
+
+        // TODO: https://github.com/playcanvas/engine/issues/6680
+        if (append) {
+            (this._entity.render as any)._meshInstances.length = 0;
+        }
+
+        this._entity.render!.meshInstances = meshInstances;
     }
 
     private _forceUpdateRenderComponent() {
@@ -96,46 +151,29 @@ export default class EntityPatchesMesh extends SquareIterator {
         this._prevUseMeshBag = !!this.instancing;
 
         if (this._entity.render) {
-
-            // TODO: https://github.com/playcanvas/engine/issues/6680
-            if (append) {
-                (this._entity.render as any)._meshInstances.length = 0;
-            }
-
-            this._entity.render.meshInstances = meshInstances;
+            this._updateRenderComponent(append, meshInstances);
         }
         else {
-            // TODO: add custom layers
-            this._entity.addComponent('render', {
-                meshInstances: meshInstances
-            });
+            this._createRenderComponent(meshInstances);
+            this._updateLayer();
         }
 
-        // Update default values
-        for (const meshInstance of meshInstances) {
-            meshInstance.cull = false;
-            meshInstance.castShadow = false;
-            meshInstance.receiveShadow = false;
-        }
+        this._updateMeshInstanceForRender(meshInstances);
     }
 
     public updateAabb() {
 
         for (const meshInstance of this._meshInstanceArray) {
             if (meshInstance) {
-                meshInstance.setCustomAabb(this._meshFactory.aabb);
                 meshInstance.mesh.aabb = this._meshFactory.aabb;
             }
         }
         
-        if (this.instancing) {
-            this.instancing.forEach(item => {
-                if (item.object) {
-                    item.object.setCustomAabb(this._meshFactory.aabb);
-                    item.object.mesh.aabb = this._meshFactory.aabb;
-                }
-            });
-        }
+        this.instancing?.forEach(item => {
+            if (item.object) {
+                item.object.mesh.aabb = this._meshFactory.aabb;
+            }
+        });
     }
 
     public updateRenderComponent() {
@@ -184,18 +222,22 @@ export default class EntityPatchesMesh extends SquareIterator {
         }
     }
 
+    public destroyInstancingPatchesMesh() {
+        this._instancing?.destroy((mesh) => {
+            this._meshFactory.destroyMesh(mesh);
+        });
+    }
+
     public destroyPatchesMesh() {
         for (let i = 0; i < this._meshInstanceArray.length; i++) {
             this.destroyPatchMesh(i);
         }
     }
 
-    private _cleanMeshes() {
+    private _clearMeshes() {
 
         // Destroy for recreate
-        this._instancing?.destroy((mesh) => {
-            this._meshFactory.destroyMesh(mesh);
-        });
+        this.destroyInstancingPatchesMesh();
 
         // Destroy patches meshes, they will not be used in custom or instanced rendering
         if (this._instancing) {
@@ -209,7 +251,7 @@ export default class EntityPatchesMesh extends SquareIterator {
             return;
         }
 
-        this._cleanMeshes();
+        this._clearMeshes();
         this._instancingType = type;
         this._instancing = type === 'combine' ? new PatchCombineInstancing() :
                            type === 'simple'  ? new PatchInstancing() :
@@ -242,7 +284,7 @@ export default class EntityPatchesMesh extends SquareIterator {
 
     public updateMeshes() {
 
-        this._cleanMeshes();
+        this._clearMeshes();
         
         if (this.instancing) {
             this.instancing.build(this._meshFactory.buffersManager.heightMap.field, (lodInfo, primitiveInfo, data) => {
@@ -254,5 +296,12 @@ export default class EntityPatchesMesh extends SquareIterator {
         }
 
         this._forceUpdateRenderComponent();
+    }
+
+    public destroy() {
+        this.destroyPatchesMesh();
+        this.destroyInstancingPatchesMesh();
+        this._material.destroy();
+        this._entity.destroy();
     }
 }

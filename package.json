@@ -1,6 +1,6 @@
 {
   "name": "playcanvas-terrain-system",
-  "version": "0.0.4b",
+  "version": "0.0.5b",
   "description": "",
   "main": "index.js",
   "type": "module",

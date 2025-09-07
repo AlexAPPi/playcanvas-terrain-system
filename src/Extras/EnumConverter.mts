@@ -8,6 +8,7 @@ export function mapTitleEnum<T extends Record<string, unknown>>(someEnum: T) {
 
     for (let value in someEnum) {
 
+        // Skip number values
         if (!someEnum.hasOwnProperty(value) ||
             isNumeric(value)) {
             continue;

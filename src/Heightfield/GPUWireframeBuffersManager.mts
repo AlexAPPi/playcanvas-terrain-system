@@ -31,10 +31,10 @@ export default class GPUWireframeBufferManager {
     public constructor(byffersManager: GPUBuffersManager, lodInfo: IReadonlyLodInfo[]) {
         this._byffersManager = byffersManager;
         this._lodInfo = lodInfo;
-        this._fillBuffers();
+        this._initData();
     }
 
-    private _fillBuffers() {
+    private _initData() {
 
         this._data = new Array(this._lodInfo.length);
 
@@ -73,11 +73,11 @@ export default class GPUWireframeBufferManager {
         const indexBuffer = this._byffersManager.sharedIndexBuffer;
         const numVertices = this._byffersManager.sharedVertexBuffer.numVertices;
 
+        const seen = new Set();
         const base = lodInfo.start;
         const count = lodInfo.count;
         const srcIndices = new Uint32Array(indexBuffer.storage);
         const tmpIndices = [];
-        const seen = new Set();
 
         for (let j = base; j < base + count; j += 3) {
             for (let k = 0; k < 3; k++) {
@@ -99,7 +99,7 @@ export default class GPUWireframeBufferManager {
             pc.INDEXFORMAT_UINT32,
             dstIndices.length,
             pc.BUFFER_STATIC,
-            dstIndices,
+            dstIndices.buffer,
             { storage: false }
         );
     }

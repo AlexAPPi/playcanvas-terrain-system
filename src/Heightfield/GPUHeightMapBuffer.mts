@@ -1,11 +1,11 @@
 import type { int } from "../Extras/Types.mjs";
 import { checkSupportR32FTexture } from "../Extras/Utils.mjs";
 import type { IReadonlyAbsHeightMap, THeightMapFormat } from "../Core/AbsHeightMap.mjs";
-import CompressedPatchedHeightMap from "../Core/CompressedPatchedHeightMap.mjs";
 import SquareIterator from "../Core/SquareIterator.mjs";
 import type { IZone } from "../Core/IZone.mjs";
 import Heightfield from "../Core/Heightfield.mjs";
 import { getTextureType } from "./ShaderChunks.mjs";
+import PatchedHeightMap from "../Core/PatchedHeightMap.mjs";
 
 export default class GPUHeightMapBuffer extends SquareIterator {
 
@@ -51,7 +51,7 @@ export default class GPUHeightMapBuffer extends SquareIterator {
             addressU: pc.ADDRESS_CLAMP_TO_EDGE,
             addressV: pc.ADDRESS_CLAMP_TO_EDGE,
             addressW: pc.ADDRESS_CLAMP_TO_EDGE,
-            flipY: device.isWebGPU,
+            flipY: !device.isWebGPU,
             arrayLength: chunks.length,
             levels: [chunks]
         });
@@ -81,6 +81,11 @@ export default class GPUHeightMapBuffer extends SquareIterator {
 
             const webgpu  = (this._app.graphicsDevice as any).wgpu as GPUDevice;
             const texture = (this._texture.impl.gpuTexture) as GPUTexture;
+            const formatInfo = pc.pixelFormatInfo.get(this._texture.format);
+
+            if (!formatInfo || !formatInfo.size) {
+                throw new Error("Invalid texture format");
+            }
 
             webgpu.queue.writeTexture(
                 {
@@ -90,12 +95,13 @@ export default class GPUHeightMapBuffer extends SquareIterator {
                 buffer,
                 {
                     offset: 0,
-                    bytesPerRow: dataChunkSize * 4, // always 4 for rgba format
+                    bytesPerRow: dataChunkSize * formatInfo.size,
                     rowsPerImage: dataChunkSize
                 },
                 {
                     width: dataChunkSize,
-                    height: dataChunkSize
+                    height: dataChunkSize,
+                    depthOrArrayLayers: 1
                 }
             );
         }
@@ -122,10 +128,21 @@ export default class GPUHeightMapBuffer extends SquareIterator {
 
 export function getHeightMapFormat(graphicsDevice: pcx.GraphicsDevice, heightMap: IReadonlyAbsHeightMap) {
     
-    let hmFormat: THeightMapFormat = checkSupportR32FTexture(graphicsDevice) ? 'r32f' : 'rgba';
+    let hmFormat: THeightMapFormat = 'r32f';
 
-    if (heightMap instanceof CompressedPatchedHeightMap) {
-        hmFormat = heightMap.compressAlgoritm === 'x4' ? 'rgbaX4' : 'rgbaX2';
+    if (heightMap instanceof PatchedHeightMap) {
+
+        switch (heightMap.valueType) {
+            case '32f': hmFormat = 'r32f'; break;
+            case '16u': hmFormat = 'r16u'; break;
+            case '8u':  hmFormat = 'r8u'; break;
+            default: throw new Error("Unsupported value type");
+        }
+    }
+
+    // Use polyfill float texture by rgba->float converter by shader
+    if (hmFormat === 'r32f' && !checkSupportR32FTexture(graphicsDevice)) {
+        hmFormat = 'rgba';
     }
 
     return hmFormat;
@@ -137,11 +154,11 @@ export function getHeightMapChunkBufferType(graphicsDevice: pcx.GraphicsDevice, 
         return Float32Array;
     }
 
-    if (format === pc.PIXELFORMAT_RG16U) {
+    if (format === pc.PIXELFORMAT_R16U) {
         return Uint16Array;
     }
 
-    if (format === pc.PIXELFORMAT_RGBA8U) {
+    if (format === pc.PIXELFORMAT_R8U) {
         return Uint8Array;
     }
 

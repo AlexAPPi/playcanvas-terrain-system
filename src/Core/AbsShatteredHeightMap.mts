@@ -24,6 +24,8 @@ export interface IReadonlyAbsShatteredHeightMap extends IReadonlyAbsHeightMap {
     getPatchMax(patchBaseX: int, patchBaseZ: int): float;
     getPatchMinFactor(patchBaseX: int, patchBaseZ: int): float;
     getPatchMaxFactor(patchBaseX: int, patchBaseZ: int): float;
+    getPerformPatchMin(patchBaseX: int, patchBaseZ: int): float;
+    getPerformPatchMax(patchBaseX: int, patchBaseZ: int): float;
 }
 
 export interface IReadonlyAbsShatteredHeightMapTypped<TData extends Float32Array | Uint16Array | Uint8Array = HeightMapArrType> extends IReadonlyAbsShatteredHeightMap, IReadonlyHeightMap<TData> {
@@ -36,7 +38,10 @@ export abstract class AbsShatteredHeightMap<TData extends Float32Array | Uint16A
     protected _numPatchesX: int;
     protected _numPatchesZ: int;
     protected _patchesSegmentSize: int;
-    protected _minMaxHeightCoords: int[];
+    protected _minMaxPatchesCoords: int[];
+
+    protected _performMinPatchesValue: float[];
+    protected _performMaxPatchesValue: float[];
 
     public get patchSize()   { return this._patchSize; }
     public get numPatchesX() { return this._numPatchesX; }
@@ -47,19 +52,52 @@ export abstract class AbsShatteredHeightMap<TData extends Float32Array | Uint16A
     public constructor(width: int, depth: int, patchSize: int, maxHeight: float, buffer?: TData | undefined, itemSize: int = defaultHeightVertexSize, itemHeightIndexOffset: int = 0) {
         super(width, depth, maxHeight, buffer! /** TS huck */, itemSize, itemHeightIndexOffset);
         this._setPatchSize(patchSize);
-        this._clearMinMaxHeightCoords();
+        this._clearMinMax();
     }
     
     protected _setPatchSize(patchSize: int) {
+
+        // We can use shared buffer for calculation in multi threads
         this._patchSize   = patchSize;
         this._numPatchesX = ((this.width - 1) / (this._patchSize - 1)) | 0;
         this._numPatchesZ = ((this.depth - 1) / (this._patchSize - 1)) | 0;
         this._patchesSegmentSize = this._numPatchesX * this._numPatchesZ * minMaxStackSize;
-        this._minMaxHeightCoords = new Array<int>(minMaxGlobalSize + this._patchesSegmentSize * 2);
+        this._minMaxPatchesCoords = new Array<int>(minMaxGlobalSize + this._patchesSegmentSize * 2);
+
+        // Alloc memory for performance values
+        this._performMinPatchesValue = new Array<float>(this._numPatchesX * this._numPatchesZ);
+        this._performMaxPatchesValue = new Array<float>(this._numPatchesX * this._numPatchesZ);
     }
 
-    protected _clearMinMaxHeightCoords() {
-        this._minMaxHeightCoords.fill(0);
+    protected _clearMinMax() {
+        this._minMaxPatchesCoords.fill(0);
+        this._performMinPatchesValue.fill(0);
+        this._performMaxPatchesValue.fill(0);
+    }
+
+    protected _recalculatePerformanceValuesByMaxHeight(oldMaxHeight: float, newMaxHeight: float) {
+
+        const factor = oldMaxHeight / newMaxHeight;
+        const count  = this._performMinPatchesValue.length;
+
+        for (let i = 0; i < count; i++) {
+            this._performMinPatchesValue[i] *= factor;
+            this._performMaxPatchesValue[i] *= factor;
+        }
+    }
+
+    public override setMaxHeight(maxHeight: float): void {
+        const oldMaxHeight = this.maxHeight;
+        super.setMaxHeight(maxHeight);
+        this._recalculatePerformanceValuesByMaxHeight(oldMaxHeight, maxHeight);
+    }
+
+    public getPerformPatchMin(patchBaseX: int, patchBaseZ: int): float {
+        return this._performMinPatchesValue[patchBaseZ * this._numPatchesX + patchBaseX];
+    }
+
+    public getPerformPatchMax(patchBaseX: int, patchBaseZ: int): float {
+        return this._performMaxPatchesValue[patchBaseZ * this._numPatchesX + patchBaseX];
     }
 
     public getEntriesPatchMin(x: int, z: int) {
@@ -87,71 +125,76 @@ export abstract class AbsShatteredHeightMap<TData extends Float32Array | Uint16A
     }
 
     public getMin() {
-        return this.get(this._minMaxHeightCoords[0], this._minMaxHeightCoords[1]);
+        return this.get(this._minMaxPatchesCoords[0], this._minMaxPatchesCoords[1]);
     }
 
     public getMax() {
-        return this.get(this._minMaxHeightCoords[2], this._minMaxHeightCoords[3]);
+        return this.get(this._minMaxPatchesCoords[2], this._minMaxPatchesCoords[3]);
     }
 
     public getMinFactor() {
-        return this.getFactor(this._minMaxHeightCoords[0], this._minMaxHeightCoords[1]);
+        return this.getFactor(this._minMaxPatchesCoords[0], this._minMaxPatchesCoords[1]);
     }
 
     public getMaxFactor() {
-        return this.getFactor(this._minMaxHeightCoords[2], this._minMaxHeightCoords[3]);
+        return this.getFactor(this._minMaxPatchesCoords[2], this._minMaxPatchesCoords[3]);
     }
 
     public getPatchMin(patchBaseX: int, patchBaseZ: int) {
         const index = minMaxGlobalSize + (patchBaseZ * this._numPatchesX + patchBaseX) * minMaxStackSize;
-        return this.get(this._minMaxHeightCoords[index], this._minMaxHeightCoords[index + 1]);
+        return this.get(this._minMaxPatchesCoords[index], this._minMaxPatchesCoords[index + 1]);
     }
 
     public getPatchMax(patchBaseX: int, patchBaseZ: int) {
         const index = minMaxGlobalSize + (patchBaseZ * this._numPatchesX + patchBaseX) * minMaxStackSize + this._patchesSegmentSize;
-        return this.get(this._minMaxHeightCoords[index], this._minMaxHeightCoords[index + 1]);
+        return this.get(this._minMaxPatchesCoords[index], this._minMaxPatchesCoords[index + 1]);
     }
 
     public getPatchMinFactor(patchBaseX: int, patchBaseZ: int) {
         const index = minMaxGlobalSize + (patchBaseZ * this._numPatchesX + patchBaseX) * minMaxStackSize;
-        return this.getFactor(this._minMaxHeightCoords[index], this._minMaxHeightCoords[index + 1]);
+        return this.getFactor(this._minMaxPatchesCoords[index], this._minMaxPatchesCoords[index + 1]);
     }
 
     public getPatchMaxFactor(patchBaseX: int, patchBaseZ: int) {
         const index = minMaxGlobalSize + (patchBaseZ * this._numPatchesX + patchBaseX) * minMaxStackSize + this._patchesSegmentSize;
-        return this.getFactor(this._minMaxHeightCoords[index], this._minMaxHeightCoords[index + 1]);
+        return this.getFactor(this._minMaxPatchesCoords[index], this._minMaxPatchesCoords[index + 1]);
     }
 
     public recalculateAABB() {
 
-        this._minMaxHeightCoords[0] = 0;
-        this._minMaxHeightCoords[1] = 0;
-        this._minMaxHeightCoords[2] = 0;
-        this._minMaxHeightCoords[3] = 0;
+        this._minMaxPatchesCoords[0] = 0;
+        this._minMaxPatchesCoords[1] = 0;
+        this._minMaxPatchesCoords[2] = 0;
+        this._minMaxPatchesCoords[3] = 0;
 
-        let minFactor = Number.MAX_SAFE_INTEGER;
-        let maxFactor = Number.MIN_SAFE_INTEGER;
+        let minValue = Number.MAX_SAFE_INTEGER;
+        let maxValue = Number.MIN_SAFE_INTEGER;
         
         for (let patchZ = 0; patchZ < this._numPatchesZ; patchZ++) {
 
             for (let patchX = 0; patchX < this._numPatchesX; patchX++) {
 
-                const minIndex = minMaxGlobalSize + (patchZ * this._numPatchesX + patchX) * minMaxStackSize;
+                const patchIdx = patchZ * this._numPatchesX + patchX;
+                const minIndex = minMaxGlobalSize + patchIdx * minMaxStackSize;
                 const maxIndex = minIndex + this._patchesSegmentSize;
 
-                const patchMinFactor = this.getFactor(this._minMaxHeightCoords[minIndex], this._minMaxHeightCoords[minIndex + 1]);
-                const patchMaxfactor = this.getFactor(this._minMaxHeightCoords[maxIndex], this._minMaxHeightCoords[maxIndex + 1]);
+                const patchMinValue = this.get(this._minMaxPatchesCoords[minIndex], this._minMaxPatchesCoords[minIndex + 1]);
+                const patchMaxValue = this.get(this._minMaxPatchesCoords[maxIndex], this._minMaxPatchesCoords[maxIndex + 1]);
 
-                if (minFactor > patchMinFactor) {
-                    minFactor = patchMinFactor;
-                    this._minMaxHeightCoords[0] = this._minMaxHeightCoords[minIndex];
-                    this._minMaxHeightCoords[1] = this._minMaxHeightCoords[minIndex + 1];
+                // update performace values
+                this._performMinPatchesValue[patchIdx] = patchMinValue;
+                this._performMaxPatchesValue[patchIdx] = patchMaxValue;
+
+                if (minValue > patchMinValue) {
+                    minValue = patchMinValue;
+                    this._minMaxPatchesCoords[0] = this._minMaxPatchesCoords[minIndex];
+                    this._minMaxPatchesCoords[1] = this._minMaxPatchesCoords[minIndex + 1];
                 }
 
-                if (maxFactor < patchMaxfactor) {
-                    maxFactor = patchMaxfactor;
-                    this._minMaxHeightCoords[2] = this._minMaxHeightCoords[maxIndex];
-                    this._minMaxHeightCoords[3] = this._minMaxHeightCoords[maxIndex + 1];
+                if (maxValue < patchMaxValue) {
+                    maxValue = patchMaxValue;
+                    this._minMaxPatchesCoords[2] = this._minMaxPatchesCoords[maxIndex];
+                    this._minMaxPatchesCoords[3] = this._minMaxPatchesCoords[maxIndex + 1];
                 }
             }
         }
@@ -167,8 +210,8 @@ export abstract class AbsShatteredHeightMap<TData extends Float32Array | Uint16A
         const fixedMaxX = Math.min(zone.maxX, this.width);
         const fixedMaxZ = Math.min(zone.maxZ, this.depth);
 
-        let globalMinF = Number.MAX_SAFE_INTEGER;
-        let globalMaxF = Number.MIN_SAFE_INTEGER;
+        let globalMinV = Number.MAX_SAFE_INTEGER;
+        let globalMaxV = Number.MIN_SAFE_INTEGER;
 
         let globalMinX = 0;
         let globalMinZ = 0;
@@ -179,71 +222,75 @@ export abstract class AbsShatteredHeightMap<TData extends Float32Array | Uint16A
             
             for (let x = fixedMinX; x < fixedMaxX; x += this._patchSize) {
                 
-                const patchX   = x / this._patchSize | 0;
-                const patchZ   = z / this._patchSize | 0;
-                const patchI   = patchZ * this._numPatchesX + patchX;
-                const minIndex = minMaxGlobalSize + patchI * minMaxStackSize;
-                const maxIndex = minIndex + this._patchesSegmentSize;
+                const patchX = x / this._patchSize | 0;
+                const patchZ = z / this._patchSize | 0;
+                const patchI = patchZ * this._numPatchesX + patchX;
+                const minIdx = minMaxGlobalSize + patchI * minMaxStackSize;
+                const maxIdx = minIdx + this._patchesSegmentSize;
                 
-                const firstPatchX = patchX * this._patchSize;
-                const firstPatchZ = patchZ * this._patchSize;
+                const firstPatchX = patchX * (this._patchSize - 1);
+                const firstPatchZ = patchZ * (this._patchSize - 1);
                 const lastPatchX  = firstPatchX + this._patchSize;
                 const lastPatchZ  = firstPatchZ + this._patchSize;
 
-                let minF = Number.MAX_SAFE_INTEGER;
-                let maxF = Number.MIN_SAFE_INTEGER;
+                let minV = Number.MAX_SAFE_INTEGER;
+                let maxV = Number.MIN_SAFE_INTEGER;
                 let minX = firstPatchX;
                 let minZ = firstPatchZ;
                 let maxX = firstPatchX;
                 let maxZ = firstPatchZ;
 
-                for (let innerZ = firstPatchZ + 1; innerZ < lastPatchZ; innerZ++) {
+                for (let innerZ = firstPatchZ; innerZ < lastPatchZ; innerZ++) {
 
-                    for (let innerX = firstPatchX + 1; innerX < lastPatchX; innerX++) {
+                    for (let innerX = firstPatchX; innerX < lastPatchX; innerX++) {
                         
-                        const factor = this.getFactor(innerX, innerZ);
+                        const value = this.get(innerX, innerZ);
 
-                        if (minF > factor) {
-                            minF = factor;
+                        if (minV > value) {
+                            minV = value;
                             minX = innerX;
                             minZ = innerZ;
                         }
 
-                        if (maxF < factor) {
-                            maxF = factor;
+                        if (maxV < value) {
+                            maxV = value;
                             maxX = innerX;
                             maxZ = innerZ;
                         }
                     }
                 }
 
-                if (globalMinF > minF) {
-                    globalMinF = minF;
+                if (globalMinV > minV) {
+                    globalMinV = minV;
                     globalMinX = minX;
                     globalMinZ = minZ;
                 }
 
-                if (globalMaxF < maxF) {
-                    globalMaxF = maxF;
+                if (globalMaxV < maxV) {
+                    globalMaxV = maxV;
                     globalMaxX = maxX;
                     globalMaxZ = maxZ;
                 }
 
-                this._minMaxHeightCoords[minIndex]     = minX;
-                this._minMaxHeightCoords[minIndex + 1] = minZ;
-                this._minMaxHeightCoords[maxIndex]     = maxX;
-                this._minMaxHeightCoords[maxIndex + 1] = maxZ;
+                this._minMaxPatchesCoords[minIdx]     = minX;
+                this._minMaxPatchesCoords[minIdx + 1] = minZ;
+                this._minMaxPatchesCoords[maxIdx]     = maxX;
+                this._minMaxPatchesCoords[maxIdx + 1] = maxZ;
+
+                // Update performance values
+                this._performMinPatchesValue[patchI] = minV;
+                this._performMaxPatchesValue[patchI] = maxV;
             }
         }
 
-        if (this.getMinFactor() > globalMinF) {
-            this._minMaxHeightCoords[0] = globalMinX;
-            this._minMaxHeightCoords[1] = globalMinZ;
+        if (this.getMin() > globalMinV) {
+            this._minMaxPatchesCoords[0] = globalMinX;
+            this._minMaxPatchesCoords[1] = globalMinZ;
         }
 
-        if (this.getMaxFactor() < globalMaxF) {
-            this._minMaxHeightCoords[2] = globalMaxX;
-            this._minMaxHeightCoords[3] = globalMaxZ;
+        if (this.getMax() < globalMaxV) {
+            this._minMaxPatchesCoords[2] = globalMaxX;
+            this._minMaxPatchesCoords[3] = globalMaxZ;
         }
     }
 }

@@ -68,30 +68,32 @@ const p = [
 // This isn't a very good seeding function, but it works ok. It supports 2^16
 // different seed values. Write something better if you need more seeds.
 function seed (seed: number) {
+
 	if (seed > 0 && seed < 1) {
 		// Scale the seed out
-		seed *= 65536
+		seed *= 65536;
 	}
 
-	seed = Math.floor(seed)
+	seed = Math.floor(seed);
+
 	if (seed < 256) {
-		seed |= seed << 8
+		seed |= seed << 8;
 	}
 
 	for (let i = 0; i < 256; i++) {
 		let v: number
 		if (i & 1) {
-			v = p[i] ^ (seed & 255)
+			v = p[i] ^ (seed & 255);
 		} else {
-			v = p[i] ^ ((seed >> 8) & 255)
+			v = p[i] ^ ((seed >> 8) & 255);
 		}
 
-		perm[i] = perm[i + 256] = v
-		gradP[i] = gradP[i + 256] = grad3[v % 12]
+		perm[i] = perm[i + 256] = v;
+		gradP[i] = gradP[i + 256] = grad3[v % 12];
 	}
 }
 
-seed(0)
+seed(0);
 
 // 2D simplex noise
 export default function simplex(xin: number, yin: number) {

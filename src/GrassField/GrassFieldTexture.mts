@@ -1,6 +1,6 @@
 import { int } from "../Extras/Types.mjs";
 
-export class GrassFieldTexture {
+export class GrassFieldData {
 
     public static readonly MAX_CHANEL = 8;
 
@@ -19,7 +19,7 @@ export class GrassFieldTexture {
         const w = (width - 1) / 4 + 1;
         const d = (depth - 1) / 4 + 1;
 
-        this._buffer = buffer ?? new Uint8Array(w * d * 4); // => 1 byte = 8 bits => 8 / 2 = 4 bit for 8 levels
+        this._buffer = buffer ?? new Uint8Array(w * d * 4);
         this._texture = new pc.Texture(graphicsDevice, {
             width: w,
             height: d,
@@ -29,7 +29,7 @@ export class GrassFieldTexture {
             magFilter: pc.FILTER_NEAREST,
             addressU: pc.ADDRESS_CLAMP_TO_EDGE,
             addressV: pc.ADDRESS_CLAMP_TO_EDGE,
-            flipY: graphicsDevice.isWebGPU,
+            flipY: !graphicsDevice.isWebGPU,
             levels: [this._buffer]
         });
     }

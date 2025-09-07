@@ -1,9 +1,12 @@
 export default class Random {
 
-    private _tmp: number;
-    private _tick: number;
+    public static readonly M1 = 268435456;
+    public static readonly M2 = 941205;
 
     readonly seed: number;
+
+    private _tmp: number;
+    private _tick: number;
 
     constructor(seed: number) {
         this.seed = seed;
@@ -15,8 +18,8 @@ export default class Random {
     }
 
     next(): number {
-        this._tmp = (this._tmp * 48271) % 2147483647;
-        this._tick = this._tmp / 2147483647;
+        this._tmp = (this._tmp * Random.M2) % Random.M1;
+        this._tick = this._tmp / Random.M1;
         return this._tick;
     }
 
